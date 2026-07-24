@@ -2,10 +2,13 @@
 
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from ..deps import get_scan_manager, get_policy_store
+from ..deps import (
+    get_policy_store, get_public_visibility_store, get_scan_manager, request_is_admin,
+)
+from ..review_visibility import passes_visibility, visibility_filter_kwargs
 from ...agent.tools import jurisdiction_matches
 from ...core import jurisdictions
 from ...core.models import LIFECYCLE_STAGES
@@ -43,6 +46,7 @@ def _matches_place(place: "jurisdictions.Jurisdiction", jurisdiction_text: Optio
 
 @router.get("/policies")
 def list_policies(
+    request: Request,
     jurisdiction: Optional[str] = Query(None),
     policy_type: Optional[str] = Query(None),
     min_score: Optional[int] = Query(None, ge=1, le=10),
@@ -50,8 +54,12 @@ def list_policies(
     review_status: Optional[str] = Query(None),
     place: Optional[str] = Query(None),
     lifecycle_stage: Optional[str] = Query(None),
+    review: Optional[str] = Query(
+        None, description="Non-admin view clamp: 'reviewed' or 'all'.",
+    ),
     store: PolicyStore = Depends(get_policy_store),
     manager: ScanManager = Depends(get_scan_manager),
+    visibility_store=Depends(get_public_visibility_store),
 ):
     """Search policies with optional filters.
 
@@ -60,6 +68,11 @@ def list_policies(
     (place=us also returns federal + every US state policy); subnational and
     supranational slugs match exactly. ``lifecycle_stage`` is an exact match
     against ``src.core.models.LIFECYCLE_STAGES``.
+
+    Non-admin callers never see rejected policies: ``review_status=rejected``
+    from a non-admin returns empty rather than an error, and ``review``
+    (clamped by the admin's public visibility posture) governs the rest —
+    see src/api/review_visibility.py.
     """
     place_jur = None
     if place is not None:
@@ -68,14 +81,22 @@ def list_policies(
             raise HTTPException(status_code=404, detail=f"Unknown place '{place}'")
     _validate_lifecycle_stage(lifecycle_stage)
 
+    is_admin = request_is_admin(request)
+    if not is_admin and review_status == "rejected":
+        return {"policies": [], "count": 0}
+
+    effective_review_status = review_status if is_admin else None
+    filter_kwargs = visibility_filter_kwargs(request, review, visibility_store.get().mode)
+
     # Merge stored policies with in-memory scan results
     stored = store.search(
         jurisdiction=jurisdiction,
         policy_type=policy_type,
         min_score=min_score,
         scan_id=scan_id,
-        review_status=review_status,
+        review_status=effective_review_status,
         lifecycle_stage=lifecycle_stage,
+        **filter_kwargs,
     )
 
     # Also include in-memory policies from recent scans
@@ -90,9 +111,11 @@ def list_policies(
             continue
         if scan_id and p_dict.get("scan_id") != scan_id:
             continue
-        if review_status and p_dict.get("review_status", "new") != review_status:
+        if effective_review_status and p_dict.get("review_status", "new") != effective_review_status:
             continue
         if lifecycle_stage and p_dict.get("lifecycle_stage") != lifecycle_stage:
+            continue
+        if not is_admin and not passes_visibility(p_dict, filter_kwargs):
             continue
         in_memory.append(p_dict)
 
@@ -114,19 +137,26 @@ def list_policies(
 # so "/api/policies/search" always resolves here, not to a path parameter.
 @router.get("/policies/search")
 def search_policies_text(
+    request: Request,
     q: str = Query(..., min_length=1, max_length=200),
     jurisdiction: Optional[str] = Query(None),
     policy_type: Optional[str] = Query(None),
     min_score: Optional[int] = Query(None, ge=1, le=10),
     lifecycle_stage: Optional[str] = Query(None),
+    review: Optional[str] = Query(
+        None, description="Non-admin view clamp: 'reviewed' or 'all'.",
+    ),
     limit: int = Query(20, ge=1, le=100),
     store: PolicyStore = Depends(get_policy_store),
+    visibility_store=Depends(get_public_visibility_store),
 ):
     """Free-text search over stored policies (name, summary, key requirements,
     jurisdiction). See ``PolicyStore.search_text`` for ranking and matching
     semantics. ``lifecycle_stage`` is an exact match against
-    ``src.core.models.LIFECYCLE_STAGES``."""
+    ``src.core.models.LIFECYCLE_STAGES``. ``review`` clamps non-admin callers
+    the same as GET /api/policies — see src/api/review_visibility.py."""
     _validate_lifecycle_stage(lifecycle_stage)
+    filter_kwargs = visibility_filter_kwargs(request, review, visibility_store.get().mode)
     results = store.search_text(
         q,
         jurisdiction=jurisdiction,
@@ -134,6 +164,7 @@ def search_policies_text(
         min_score=min_score,
         lifecycle_stage=lifecycle_stage,
         limit=limit,
+        **filter_kwargs,
     )
     return {"policies": results, "total": len(results), "query": q}
 

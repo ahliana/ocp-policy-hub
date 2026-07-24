@@ -10,7 +10,7 @@ from google.oauth2.service_account import Credentials
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..core.models import Policy
-from ..core.policy_schema import LINK_HEADER, STAGING_HEADERS
+from ..core.policy_schema import LINK_HEADER, REVIEW_STATUS_HEADER, STAGING_HEADERS
 from ..storage.leads import Lead
 
 logger = logging.getLogger(__name__)
@@ -126,6 +126,44 @@ class SheetsClient:
         rows = [p.to_sheet_row() for p in new_policies]
         sheet.append_rows(rows, value_input_option="USER_ENTERED")
         return len(rows)
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=20))
+    def update_review_statuses(
+        self, url_statuses: dict[str, str], sheet_name: str = "Staging",
+    ) -> int:
+        """Batch-write the Review Status column for matching Staging rows.
+
+        One-way (app -> sheet), URL-matched. Tolerant of missing rows: a URL
+        not on the sheet yet (or a sheet that doesn't exist at all) is
+        silently skipped rather than an error — the review workflow can
+        outrun a not-yet-exported row. Returns the count of rows updated.
+        """
+        if not url_statuses:
+            return 0
+        try:
+            sheet = self._spreadsheet.worksheet(sheet_name)
+        except gspread.WorksheetNotFound:
+            return 0
+
+        header_row = sheet.row_values(1)
+        if REVIEW_STATUS_HEADER not in header_row:
+            return 0
+        review_col = header_row.index(REVIEW_STATUS_HEADER) + 1
+        link_col = self._link_column_index(sheet)
+
+        urls = sheet.col_values(link_col)
+        updates = [
+            {
+                "range": gspread.utils.rowcol_to_a1(row_idx, review_col),
+                "values": [[url_statuses[url]]],
+            }
+            for row_idx, url in enumerate(urls[1:], start=2)
+            if url in url_statuses
+        ]
+        if not updates:
+            return 0
+        sheet.batch_update(updates)
+        return len(updates)
 
     def get_tips_sheet(self, name: str = "Tips") -> gspread.Worksheet:
         try:

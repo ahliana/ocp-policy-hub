@@ -47,7 +47,7 @@ function compareText(firstValue, secondValue) {
   return String(firstValue || '').localeCompare(String(secondValue || ''));
 }
 
-function PolicyList({ externalPlace = null }) {
+function PolicyList({ externalPlace = null, publicView = 'all' }) {
   const [policies, setPolicies] = useState([]);
   const [tags, setTags] = useState({});
   const [selectedJurisdictions, setSelectedJurisdictions] = useState([]);
@@ -81,8 +81,9 @@ function PolicyList({ externalPlace = null }) {
     const loadSavedPolicies = async () => {
       setError(null);
       try {
+        const params = new URLSearchParams({ review: publicView });
         const [policiesResponse, tagsResponse] = await Promise.all([
-          fetch(apiUrl('/api/policies')),
+          fetch(apiUrl(`/api/policies?${params.toString()}`)),
           fetch(apiUrl('/api/tags')),
         ]);
 
@@ -113,7 +114,7 @@ function PolicyList({ externalPlace = null }) {
     return () => {
       window.removeEventListener('policy-data-changed', loadSavedPolicies);
     };
-  }, []);
+  }, [publicView]);
 
   useEffect(() => {
     if (!externalPlace) return undefined;
@@ -124,7 +125,7 @@ function PolicyList({ externalPlace = null }) {
 
     const loadPlacePolicies = async () => {
       try {
-        const params = new URLSearchParams({ place: externalPlace.slug });
+        const params = new URLSearchParams({ place: externalPlace.slug, review: publicView });
         const response = await fetch(apiUrl(`/api/policies?${params.toString()}`));
         if (!response.ok) {
           throw new Error(`Failed to load policies for ${externalPlace.name} (${response.status})`);
@@ -149,7 +150,7 @@ function PolicyList({ externalPlace = null }) {
     return () => {
       cancelled = true;
     };
-  }, [externalPlace]);
+  }, [externalPlace, publicView]);
 
   useEffect(() => {
     if (lifecycleMode !== 'open_for_comment') return undefined;
@@ -160,7 +161,9 @@ function PolicyList({ externalPlace = null }) {
 
     const loadConsultationPolicies = async () => {
       try {
-        const params = new URLSearchParams({ lifecycle_stage: 'consultation' });
+        const params = new URLSearchParams({
+          lifecycle_stage: 'consultation', review: publicView,
+        });
         const response = await fetch(apiUrl(`/api/policies?${params.toString()}`));
         if (!response.ok) {
           throw new Error(`Failed to load open-for-comment policies (${response.status})`);
@@ -181,7 +184,7 @@ function PolicyList({ externalPlace = null }) {
     return () => {
       cancelled = true;
     };
-  }, [lifecycleMode]);
+  }, [lifecycleMode, publicView]);
 
   // Server-backed free-text search: debounce 300ms, only fire once the
   // query is 2+ characters, and drop back to the normal list (no refetch)
@@ -201,7 +204,9 @@ function PolicyList({ externalPlace = null }) {
 
     searchDebounceRef.current = setTimeout(async () => {
       try {
-        const params = new URLSearchParams({ q: trimmedQuery, limit: '50' });
+        const params = new URLSearchParams({
+          q: trimmedQuery, limit: '50', review: publicView,
+        });
         const response = await fetch(apiUrl(`/api/policies/search?${params.toString()}`));
         if (!response.ok) {
           throw new Error(`Search failed (${response.status})`);
@@ -217,7 +222,7 @@ function PolicyList({ externalPlace = null }) {
     return () => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
-  }, [nameQuery]);
+  }, [nameQuery, publicView]);
 
   // Scrolling requires the real list markup to be mounted (not the "Loading
   // policies..." placeholder returned while the baseline fetch is still in

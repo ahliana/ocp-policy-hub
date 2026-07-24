@@ -215,6 +215,16 @@ class ScanManager:
         domain.setdefault("min_keyword_score", settings.analysis.min_keyword_score)
         return domain
 
+    @staticmethod
+    def _rejected_url_statuses(store: PolicyStore) -> dict[str, str]:
+        """URL -> "rejected" for every rejected policy in ``store``.
+
+        Feeds the scan-end Staging-sheet reconciliation pass: a policy
+        rejected via the review workflow (any time, not just this scan) gets
+        its Staging row flipped to "rejected" too, one-way (app -> sheet).
+        """
+        return {p["url"]: "rejected" for p in store.search(review_status="rejected")}
+
     async def _run_scan(
         self,
         scan_id: str,
@@ -553,6 +563,22 @@ class ScanManager:
                         logger.warning(
                             f"Fallback Sheets export failed: {e}"
                         )
+
+            # Rejected-status reconciliation — a policy rejected via the
+            # review workflow (any time, not just this scan) gets its
+            # Staging row's Review Status flipped to "rejected" too.
+            # One-way, app -> sheet, never the reverse.
+            if sheets_client:
+                try:
+                    rejected = self._rejected_url_statuses(store)
+                    if rejected:
+                        updated = sheets_client.update_review_statuses(rejected, sheet_name)
+                        logger.info(
+                            f"Sheet reconciliation: marked {updated} rejected "
+                            f"policies on the Staging sheet"
+                        )
+                except Exception as e:
+                    logger.warning(f"Rejected-status sheet reconciliation failed: {e}")
 
             job.status = ScanStatus.COMPLETED
             job.completed_at = datetime.utcnow()

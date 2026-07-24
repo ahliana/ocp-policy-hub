@@ -428,6 +428,94 @@ class TestSheetsClient:
         assert client.read_staging_rows() == []
 
 
+class TestSheetsClientUpdateReviewStatuses:
+    """SheetsClient.update_review_statuses — one-way (app -> sheet), URL-matched
+    batch write to the Review Status column. Used by the scan-end
+    reconciliation pass (src/orchestration/scan_manager.py) to reflect a
+    rejected policy's status onto its Staging row."""
+
+    def _client_with_rows(self, urls):
+        """A fake worksheet whose Link column holds `urls` in row order."""
+        from src.output.sheets import SheetsClient
+
+        client = SheetsClient.__new__(SheetsClient)
+        client.spreadsheet_id = "test-id"
+        mock_sheet = MagicMock()
+        mock_sheet.row_values.return_value = list(STAGING_HEADERS)
+        mock_sheet.col_values.return_value = ["Link", *urls]
+        mock_spreadsheet = MagicMock()
+        mock_spreadsheet.worksheet.return_value = mock_sheet
+        client._spreadsheet = mock_spreadsheet
+        return client, mock_sheet
+
+    def test_matching_row_gets_rejected_status(self):
+        client, mock_sheet = self._client_with_rows(["https://a.gov/p1", "https://b.gov/p2"])
+
+        count = client.update_review_statuses({"https://a.gov/p1": "rejected"})
+
+        assert count == 1
+        mock_sheet.batch_update.assert_called_once()
+        updates = mock_sheet.batch_update.call_args[0][0]
+        assert len(updates) == 1
+        review_col = STAGING_HEADERS.index("Review Status") + 1
+        expected_range = gspread.utils.rowcol_to_a1(2, review_col)  # row 2 = first data row
+        assert updates[0]["range"] == expected_range
+        assert updates[0]["values"] == [["rejected"]]
+
+    def test_non_matching_rows_untouched(self):
+        client, mock_sheet = self._client_with_rows(
+            ["https://a.gov/p1", "https://b.gov/p2", "https://c.gov/p3"]
+        )
+
+        count = client.update_review_statuses({"https://b.gov/p2": "rejected"})
+
+        assert count == 1
+        updates = mock_sheet.batch_update.call_args[0][0]
+        assert len(updates) == 1
+        review_col = STAGING_HEADERS.index("Review Status") + 1
+        expected_range = gspread.utils.rowcol_to_a1(3, review_col)  # row 3 = second data row
+        assert updates[0]["range"] == expected_range
+
+    def test_multiple_matches_batched_in_one_call(self):
+        client, mock_sheet = self._client_with_rows(
+            ["https://a.gov/p1", "https://b.gov/p2", "https://c.gov/p3"]
+        )
+
+        count = client.update_review_statuses(
+            {"https://a.gov/p1": "rejected", "https://c.gov/p3": "rejected"}
+        )
+
+        assert count == 2
+        assert mock_sheet.batch_update.call_count == 1
+        updates = mock_sheet.batch_update.call_args[0][0]
+        assert len(updates) == 2
+
+    def test_url_not_on_sheet_is_tolerated_not_an_error(self):
+        client, mock_sheet = self._client_with_rows(["https://a.gov/p1"])
+
+        count = client.update_review_statuses({"https://nope.gov/x": "rejected"})
+
+        assert count == 0
+        mock_sheet.batch_update.assert_not_called()
+
+    def test_empty_input_returns_zero_without_touching_the_sheet(self):
+        from src.output.sheets import SheetsClient
+
+        client = SheetsClient.__new__(SheetsClient)
+        assert client.update_review_statuses({}) == 0
+
+    def test_missing_worksheet_returns_zero(self):
+        from src.output.sheets import SheetsClient
+
+        client = SheetsClient.__new__(SheetsClient)
+        client.spreadsheet_id = "test-id"
+        mock_spreadsheet = MagicMock()
+        mock_spreadsheet.worksheet.side_effect = gspread.WorksheetNotFound("Staging")
+        client._spreadsheet = mock_spreadsheet
+
+        assert client.update_review_statuses({"https://a.gov/p1": "rejected"}) == 0
+
+
 class TestSheetsClientExportTips:
     """SheetsClient.export_tips — one-way batch export to the Tips worksheet."""
 

@@ -104,6 +104,56 @@ class TestSearch:
         assert len(results) == 1
 
 
+class TestReviewVisibilityFiltering:
+    """exclude_review_status / review_status_in on get_all/search/search_text —
+    the WHERE-clause filtering WP-3's public visibility clamp relies on
+    instead of filtering large lists in Python at the route layer."""
+
+    @pytest.fixture
+    def store_with_statuses(self, tmp_path):
+        store = PolicyStore(data_dir=str(tmp_path))
+        store.add_policies([
+            _make_policy("https://a.gov/new", review_status="new"),
+            _make_policy("https://a.gov/reviewed", review_status="reviewed"),
+            _make_policy("https://a.gov/promoted", review_status="promoted"),
+            _make_policy("https://a.gov/rejected", review_status="rejected"),
+        ])
+        return store
+
+    def test_get_all_no_filter_is_unchanged(self, store_with_statuses):
+        assert len(store_with_statuses.get_all()) == 4
+
+    def test_get_all_exclude_review_status(self, store_with_statuses):
+        results = store_with_statuses.get_all(exclude_review_status="rejected")
+        statuses = {p["review_status"] for p in results}
+        assert statuses == {"new", "reviewed", "promoted"}
+
+    def test_get_all_review_status_in(self, store_with_statuses):
+        results = store_with_statuses.get_all(review_status_in=["promoted"])
+        statuses = {p["review_status"] for p in results}
+        assert statuses == {"promoted"}
+
+    def test_search_exclude_review_status(self, store_with_statuses):
+        results = store_with_statuses.search(exclude_review_status="rejected")
+        statuses = {p["review_status"] for p in results}
+        assert statuses == {"new", "reviewed", "promoted"}
+
+    def test_search_review_status_in(self, store_with_statuses):
+        results = store_with_statuses.search(review_status_in=["promoted", "reviewed"])
+        statuses = {p["review_status"] for p in results}
+        assert statuses == {"promoted", "reviewed"}
+
+    def test_search_text_exclude_review_status(self, store_with_statuses):
+        results = store_with_statuses.search_text("test", exclude_review_status="rejected")
+        statuses = {p["review_status"] for p in results}
+        assert statuses == {"new", "reviewed", "promoted"}
+
+    def test_search_text_review_status_in(self, store_with_statuses):
+        results = store_with_statuses.search_text("test", review_status_in=["promoted"])
+        statuses = {p["review_status"] for p in results}
+        assert statuses == {"promoted"}
+
+
 class TestGetStats:
     def test_stats_empty_store(self, tmp_path):
         store = PolicyStore(data_dir=str(tmp_path))

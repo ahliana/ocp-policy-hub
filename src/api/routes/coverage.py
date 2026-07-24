@@ -37,9 +37,10 @@ mistaken for a single-state one.
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from ..deps import get_config, get_policy_store, get_scan_manager
+from ..deps import get_config, get_policy_store, get_public_visibility_store, get_scan_manager
+from ..review_visibility import passes_visibility, visibility_filter_kwargs
 from ...core import jurisdictions
 from ...core.config import ConfigLoader
 from ...orchestration.scan_manager import ScanManager
@@ -272,50 +273,74 @@ def compute_children(
     }
 
 
-def _all_policies(store: PolicyStore, manager: ScanManager) -> list[dict]:
+def _all_policies(store: PolicyStore, manager: ScanManager, **filter_kwargs) -> list[dict]:
     """Persisted policies plus in-memory scan results, deduped by URL.
 
     The ``get_policy_store`` singleton is a snapshot loaded once, so policies
     found by scans in this process live in the scan manager until they land in
     that snapshot. Merging both (the same thing ``/api/policies`` does) keeps
     coverage as fresh as the policy list, so the map reflects a scan's finds.
+
+    ``filter_kwargs`` (``exclude_review_status``/``review_status_in``) is the
+    public review visibility clamp (src/api/review_visibility.py) — empty for
+    an admin caller or the diagnostics-only /coverage/unresolved route, so
+    both stay exactly as they were before this feature.
     """
-    policies = store.get_all()
+    policies = store.get_all(**filter_kwargs)
     seen = {p.get("url") for p in policies}
     for policy in manager.get_all_policies():
         p = policy.model_dump(mode="json")
-        if p.get("url") not in seen:
-            policies.append(p)
-            seen.add(p.get("url"))
+        if p.get("url") in seen:
+            continue
+        if not passes_visibility(p, filter_kwargs):
+            continue
+        policies.append(p)
+        seen.add(p.get("url"))
     return policies
 
 
 @router.get("/coverage")
 def get_coverage(
+    request: Request,
+    review: Optional[str] = Query(
+        None, description="Non-admin view clamp: 'reviewed' or 'all'.",
+    ),
     store: PolicyStore = Depends(get_policy_store),
     manager: ScanManager = Depends(get_scan_manager),
     config: ConfigLoader = Depends(get_config),
+    visibility_store=Depends(get_public_visibility_store),
 ):
-    """Coverage aggregate for the world map: countries, supranational, totals."""
+    """Coverage aggregate for the world map: countries, supranational, totals.
+
+    ``review`` clamps non-admin callers the same as GET /api/policies — see
+    src/api/review_visibility.py.
+    """
+    filter_kwargs = visibility_filter_kwargs(request, review, visibility_store.get().mode)
     result = compute_coverage(
-        _all_policies(store, manager), config.get_enabled_domains("all")
+        _all_policies(store, manager, **filter_kwargs), config.get_enabled_domains("all")
     )
     return {k: result[k] for k in ("countries", "supranational", "totals")}
 
 
 @router.get("/coverage/children")
 def get_coverage_children(
+    request: Request,
     parent: str,
+    review: Optional[str] = Query(
+        None, description="Non-admin view clamp: 'reviewed' or 'all'.",
+    ),
     store: PolicyStore = Depends(get_policy_store),
     manager: ScanManager = Depends(get_scan_manager),
     config: ConfigLoader = Depends(get_config),
+    visibility_store=Depends(get_public_visibility_store),
 ):
     """One country broken out by state/province: national vs. each child.
 
     404s for a ``parent`` slug that is not a known country jurisdiction.
     """
+    filter_kwargs = visibility_filter_kwargs(request, review, visibility_store.get().mode)
     result = compute_children(
-        parent, _all_policies(store, manager), config.get_enabled_domains("all")
+        parent, _all_policies(store, manager, **filter_kwargs), config.get_enabled_domains("all")
     )
     if result is None:
         raise HTTPException(status_code=404, detail=f"Unknown country '{parent}'")

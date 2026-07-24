@@ -24,8 +24,11 @@ function normalize(value) {
 // a word, and every entry point here - map click, quick-filter, legend,
 // off-map chip, browse list - ends at the same place, the "Search {place}"
 // action that feeds the app's existing place-first search box below.
-function WorldMap({ onSelectPlace, onViewPlacePolicies, showScanAction = true }) {
-  const { coverage, error } = useCoverage();
+function WorldMap({
+  onSelectPlace, onViewPlacePolicies, showScanAction = true,
+  publicView = 'all', onPublicViewChange, showPublicViewToggle = false,
+}) {
+  const { coverage, error } = useCoverage(publicView);
   const holderRef = useRef(null);
   const svgRef = useRef(null);
   const panZoom = usePanZoom(svgRef);
@@ -287,6 +290,31 @@ function WorldMap({ onSelectPlace, onViewPlacePolicies, showScanAction = true })
       )}
       <CoverageStatStrip totals={coverage.totals} placeCount={trackedPlaceCount} />
 
+      {showPublicViewToggle && (
+        <div
+          className="lifecycle-filter-chips wm-public-view-toggle"
+          role="group"
+          aria-label="Public review visibility"
+        >
+          <button
+            type="button"
+            className={`lifecycle-chip ${publicView === 'reviewed' ? 'active' : ''}`}
+            aria-pressed={publicView === 'reviewed'}
+            onClick={() => onPublicViewChange('reviewed')}
+          >
+            Reviewed only
+          </button>
+          <button
+            type="button"
+            className={`lifecycle-chip ${publicView === 'all' ? 'active' : ''}`}
+            aria-pressed={publicView === 'all'}
+            onClick={() => onPublicViewChange('all')}
+          >
+            All finds
+          </button>
+        </div>
+      )}
+
       {drilldown ? (
         <CountryView
           key={drilldown.slug}
@@ -297,6 +325,7 @@ function WorldMap({ onSelectPlace, onViewPlacePolicies, showScanAction = true })
           onSelectPlace={handleSearchPlace}
           onViewPlacePolicies={onViewPlacePolicies}
           showScanAction={showScanAction}
+          publicView={publicView}
         />
       ) : (
         <>

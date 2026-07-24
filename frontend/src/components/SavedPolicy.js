@@ -77,6 +77,20 @@ const UPCOMING_LIFECYCLE_STAGES = new Set([
     'proposed', 'consultation', 'in_committee', 'passed', 'transposition_notified',
 ]);
 
+// Friendly reader-facing text for the review workflow's internal statuses —
+// "new"/"promoted" read as jargon to a visitor who isn't part of the review
+// process (see WP-3 "public review visibility").
+const REVIEW_STATUS_LABELS = {
+    new: 'awaiting review',
+    reviewed: 'reviewed',
+    promoted: 'reviewed',
+    rejected: 'rejected',
+};
+
+function formatReviewStatusLabel(status) {
+    return REVIEW_STATUS_LABELS[status] || status;
+}
+
 function getLifecycleBadgeStyle(stage) {
     if (UPCOMING_LIFECYCLE_STAGES.has(stage)) {
         return { color: '#92400e', backgroundColor: '#fef3c7', borderColor: '#fde68a' };
@@ -179,7 +193,7 @@ function SavedPolicy({ policy, tags = {} }) {
                             {policy.policy_type}
                         </span>
                         <span className={`saved-policy-badge ${getReviewStatusBadge(policy.review_status)}`}>
-                            {policy.review_status}
+                            {formatReviewStatusLabel(policy.review_status)}
                         </span>
                         {policy.lifecycle_stage && policy.lifecycle_stage !== 'unknown' && (
                             <span

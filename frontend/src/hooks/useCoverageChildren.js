@@ -7,7 +7,9 @@ import { apiUrl } from '../config/api';
 //
 // Mirrors useCoverage's refetch-on-change pattern: a scan finishing while a
 // country view is open should update its counts, same as the world map.
-function useCoverageChildren(slug) {
+// `review` ('all' | 'reviewed') is the public review visibility toggle,
+// passed straight through from WorldMap/CountryView.
+function useCoverageChildren(slug, review) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -24,7 +26,9 @@ function useCoverageChildren(slug) {
 
     const load = () => {
       setIsLoading(true);
-      fetch(apiUrl(`/api/coverage/children?parent=${encodeURIComponent(slug)}`))
+      const params = new URLSearchParams({ parent: slug });
+      if (review) params.set('review', review);
+      fetch(apiUrl(`/api/coverage/children?${params.toString()}`))
         .then((res) => {
           if (!res.ok) throw new Error(`coverage children fetch failed (${res.status})`);
           return res.json();
@@ -48,7 +52,7 @@ function useCoverageChildren(slug) {
       isCurrent = false;
       window.removeEventListener('policy-data-changed', load);
     };
-  }, [slug]);
+  }, [slug, review]);
 
   return { data, error, isLoading };
 }

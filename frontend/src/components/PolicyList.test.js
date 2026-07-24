@@ -375,3 +375,97 @@ describe('PolicyList "Open for comment" chip', () => {
     });
   });
 });
+
+// --- Public review visibility (WP-3): every fetch carries ?review= ---
+
+describe('PolicyList public review visibility', () => {
+  function policiesCalls(fetchMock) {
+    return fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes('/api/policies') && !url.includes('/api/tags'));
+  }
+
+  it('defaults the baseline fetch to review=all', async () => {
+    const fetchMock = mockFetch();
+    global.fetch = fetchMock;
+    render(<PolicyList />);
+    await screen.findByText('Federal Heat Reuse Act');
+
+    const calls = policiesCalls(fetchMock);
+    expect(calls.some((url) => new URL(url).searchParams.get('review') === 'all')).toBe(true);
+  });
+
+  it('sends review=reviewed on the baseline fetch when publicView is reviewed', async () => {
+    const fetchMock = mockFetch();
+    global.fetch = fetchMock;
+    render(<PolicyList publicView="reviewed" />);
+    await waitFor(() => {
+      const calls = policiesCalls(fetchMock);
+      expect(calls.some((url) => new URL(url).searchParams.get('review') === 'reviewed')).toBe(true);
+    });
+  });
+
+  it('refetches with the new review param when publicView changes', async () => {
+    const fetchMock = mockFetch();
+    global.fetch = fetchMock;
+    const { rerender } = render(<PolicyList publicView="all" />);
+    await screen.findByText('Federal Heat Reuse Act');
+
+    rerender(<PolicyList publicView="reviewed" />);
+
+    await waitFor(() => {
+      const calls = policiesCalls(fetchMock);
+      expect(calls.some((url) => new URL(url).searchParams.get('review') === 'reviewed')).toBe(true);
+    });
+  });
+
+  it('carries review on the place-filter fetch', async () => {
+    const fetchMock = mockFetch();
+    global.fetch = fetchMock;
+    render(
+      <PolicyList
+        externalPlace={{ slug: 'us', name: 'United States', nonce: 1 }}
+        publicView="reviewed"
+      />,
+    );
+
+    await screen.findByText('United States - 2 policies');
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/policies?place=us'),
+    );
+    const placeCall = fetchMock.mock.calls.find(([url]) => String(url).includes('place=us'));
+    expect(new URL(placeCall[0]).searchParams.get('review')).toBe('reviewed');
+  });
+
+  it('carries review on the open-for-comment (consultation) fetch', async () => {
+    const fetchMock = mockFetch();
+    global.fetch = fetchMock;
+    render(<PolicyList publicView="reviewed" />);
+    await screen.findByText('Federal Heat Reuse Act');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open for comment' }));
+    await screen.findByText('Open Comment Draft Rule');
+
+    const consultationCall = fetchMock.mock.calls.find(
+      ([url]) => String(url).includes('lifecycle_stage=consultation'),
+    );
+    expect(new URL(consultationCall[0]).searchParams.get('review')).toBe('reviewed');
+  });
+
+  it('carries review on the free-text search fetch', async () => {
+    const fetchMock = mockFetch();
+    global.fetch = fetchMock;
+    render(<PolicyList publicView="reviewed" />);
+    await screen.findByText('Federal Heat Reuse Act');
+
+    fireEvent.change(screen.getByLabelText('Search policies'), { target: { value: 'sw' } });
+
+    await waitFor(() => {
+      const searchCall = fetchMock.mock.calls.find(
+        ([url]) => String(url).includes('/api/policies/search'),
+      );
+      expect(searchCall).toBeDefined();
+      expect(new URL(searchCall[0]).searchParams.get('review')).toBe('reviewed');
+    }, { timeout: 2000 });
+  });
+});

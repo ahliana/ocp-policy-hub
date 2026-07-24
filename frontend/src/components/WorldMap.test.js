@@ -417,3 +417,116 @@ describe('WorldMap', () => {
     });
   });
 });
+
+// --- Public review visibility toggle (WP-3) ---
+//
+// The toggle itself is dumb (props-driven: publicView/onPublicViewChange/
+// showPublicViewToggle) — App.js owns the actual posture-derived state so
+// the same value can also drive PolicyList's fetches. These tests cover the
+// toggle's own rendering/wiring and the ?review= param it puts on the
+// coverage fetch; the initial-position-from-posture logic lives in App.js.
+
+function fetchCoverageUrls(fetchMock) {
+  return fetchMock.mock.calls
+    .map(([url]) => String(url))
+    .filter((url) => url.includes('/api/coverage') && !url.includes('/children'));
+}
+
+describe('WorldMap public view toggle', () => {
+  it('renders both options and marks the current one active when shown', async () => {
+    global.fetch = mockFetch();
+    render(
+      <WorldMap
+        onSelectPlace={jest.fn()}
+        publicView="all"
+        onPublicViewChange={jest.fn()}
+        showPublicViewToggle
+      />,
+    );
+
+    await screen.findByText('372');
+    const allButton = screen.getByRole('button', { name: 'All finds' });
+    const reviewedButton = screen.getByRole('button', { name: 'Reviewed only' });
+    expect(allButton).toHaveAttribute('aria-pressed', 'true');
+    expect(reviewedButton).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('is hidden entirely when showPublicViewToggle is false (reviewed_only posture)', async () => {
+    global.fetch = mockFetch();
+    render(
+      <WorldMap
+        onSelectPlace={jest.fn()}
+        publicView="reviewed"
+        onPublicViewChange={jest.fn()}
+        showPublicViewToggle={false}
+      />,
+    );
+
+    await screen.findByText('372');
+    expect(screen.queryByRole('button', { name: 'All finds' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reviewed only' })).not.toBeInTheDocument();
+  });
+
+  it('clicking an option calls onPublicViewChange with that option', async () => {
+    global.fetch = mockFetch();
+    const onPublicViewChange = jest.fn();
+    render(
+      <WorldMap
+        onSelectPlace={jest.fn()}
+        publicView="all"
+        onPublicViewChange={onPublicViewChange}
+        showPublicViewToggle
+      />,
+    );
+
+    await screen.findByText('372');
+    fireEvent.click(screen.getByRole('button', { name: 'Reviewed only' }));
+    expect(onPublicViewChange).toHaveBeenCalledWith('reviewed');
+  });
+
+  it('sends the current publicView as ?review= on the coverage fetch', async () => {
+    const fetchMock = mockFetch();
+    global.fetch = fetchMock;
+    render(
+      <WorldMap
+        onSelectPlace={jest.fn()}
+        publicView="reviewed"
+        onPublicViewChange={jest.fn()}
+        showPublicViewToggle
+      />,
+    );
+
+    await screen.findByText('372');
+    const urls = fetchCoverageUrls(fetchMock);
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.every((url) => new URL(url).searchParams.get('review') === 'reviewed')).toBe(true);
+  });
+
+  it('refetches coverage with the new review param when publicView changes', async () => {
+    const fetchMock = mockFetch();
+    global.fetch = fetchMock;
+    const { rerender } = render(
+      <WorldMap
+        onSelectPlace={jest.fn()}
+        publicView="all"
+        onPublicViewChange={jest.fn()}
+        showPublicViewToggle
+      />,
+    );
+    await screen.findByText('372');
+
+    rerender(
+      <WorldMap
+        onSelectPlace={jest.fn()}
+        publicView="reviewed"
+        onPublicViewChange={jest.fn()}
+        showPublicViewToggle
+      />,
+    );
+
+    await waitFor(() => {
+      const urls = fetchCoverageUrls(fetchMock);
+      expect(urls.some((url) => new URL(url).searchParams.get('review') === 'reviewed')).toBe(true);
+    });
+  });
+});

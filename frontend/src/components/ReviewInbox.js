@@ -26,9 +26,12 @@ function ReviewInbox({ isAdmin }) {
 
     const refresh = useCallback(async () => {
         try {
+            // adminHeaders() so this stays unclamped under a reviewed_only
+            // public visibility posture — the inbox needs review_status=new
+            // items even when non-admin readers are clamped to promoted-only.
             const [newRes, promotedRes] = await Promise.all([
-                fetch(apiUrl('/api/policies?review_status=new')),
-                fetch(apiUrl('/api/policies?review_status=promoted')),
+                fetch(apiUrl('/api/policies?review_status=new'), { headers: adminHeaders() }),
+                fetch(apiUrl('/api/policies?review_status=promoted'), { headers: adminHeaders() }),
             ]);
             if (!newRes.ok) throw new Error();
             const newData = await newRes.json();

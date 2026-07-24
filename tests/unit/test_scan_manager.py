@@ -4,7 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.core.models import Policy, PolicyType
 from src.orchestration.scan_manager import ScanManager
+from src.storage.store import PolicyStore
 
 
 def _settings_with_min_score(value: float) -> MagicMock:
@@ -246,3 +248,44 @@ class TestSourceParamsOverride:
         by_id = {d["id"]: d for d in passed}
         assert by_id["api1"]["source_params"] == {"state": "CA"}
         assert "source_params" not in by_id["crawl1"]
+
+
+def _policy(url: str, review_status: str) -> Policy:
+    return Policy(
+        url=url,
+        policy_name="P",
+        jurisdiction="Sweden",
+        policy_type=PolicyType.LAW,
+        summary="s",
+        relevance_score=7,
+        review_status=review_status,
+    )
+
+
+class TestRejectedUrlStatuses:
+    """ScanManager._rejected_url_statuses feeds the scan-end Sheets
+    reconciliation pass (~src/orchestration/scan_manager.py's "Final Google
+    Sheets reconciliation" block): every rejected policy's URL, mapped to
+    the "rejected" status, ready for SheetsClient.update_review_statuses."""
+
+    def test_returns_only_rejected_urls(self, tmp_path):
+        store = PolicyStore(data_dir=str(tmp_path))
+        store.add_policies([
+            _policy("https://a.gov/new", "new"),
+            _policy("https://a.gov/rejected", "rejected"),
+            _policy("https://a.gov/promoted", "promoted"),
+        ])
+
+        result = ScanManager._rejected_url_statuses(store)
+
+        assert result == {"https://a.gov/rejected": "rejected"}
+
+    def test_empty_when_nothing_rejected(self, tmp_path):
+        store = PolicyStore(data_dir=str(tmp_path))
+        store.add_policies([_policy("https://a.gov/new", "new")])
+
+        assert ScanManager._rejected_url_statuses(store) == {}
+
+    def test_empty_store_yields_empty(self, tmp_path):
+        store = PolicyStore(data_dir=str(tmp_path))
+        assert ScanManager._rejected_url_statuses(store) == {}

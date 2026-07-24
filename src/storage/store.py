@@ -17,6 +17,29 @@ from ..core.models import Policy
 logger = logging.getLogger(__name__)
 
 
+def _review_status_conditions(
+    exclude_review_status: Optional[str],
+    review_status_in: Optional[list[str]],
+    column: str = "review_status",
+) -> tuple[list[str], list]:
+    """WHERE-clause fragments for the two review-status visibility filters.
+
+    Shared by get_all/search/search_text so the public review visibility
+    clamp (exclude a status, or restrict to a status list) is expressed once
+    as SQL rather than duplicated per query builder.
+    """
+    conditions: list[str] = []
+    params: list = []
+    if exclude_review_status:
+        conditions.append(f"({column} IS NULL OR {column} != ?)")
+        params.append(exclude_review_status)
+    if review_status_in:
+        placeholders = ",".join("?" for _ in review_status_in)
+        conditions.append(f"{column} IN ({placeholders})")
+        params.extend(review_status_in)
+    return conditions, params
+
+
 class PolicyStore:
     """Persistent storage for discovered policies."""
 
@@ -113,8 +136,26 @@ class PolicyStore:
         self._conn.commit()
         return added
 
-    def get_all(self) -> list[dict]:
-        rows = self._conn.execute("SELECT raw FROM policies ORDER BY rowid").fetchall()
+    def get_all(
+        self,
+        exclude_review_status: Optional[str] = None,
+        review_status_in: Optional[list[str]] = None,
+    ) -> list[dict]:
+        """All policies, optionally narrowed by review status.
+
+        ``exclude_review_status``/``review_status_in`` back the public
+        review visibility clamp (src/api/review_visibility.py) with a WHERE
+        clause instead of filtering the full list in Python at the route
+        layer.
+        """
+        query = "SELECT raw FROM policies"
+        conditions, params = _review_status_conditions(
+            exclude_review_status, review_status_in
+        )
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY rowid"
+        rows = self._conn.execute(query, params).fetchall()
         return [json.loads(row[0]) for row in rows]
 
     def update_review_status(self, url: str, review_status: str) -> bool:
@@ -138,6 +179,8 @@ class PolicyStore:
         scan_id: Optional[str] = None,
         review_status: Optional[str] = None,
         lifecycle_stage: Optional[str] = None,
+        exclude_review_status: Optional[str] = None,
+        review_status_in: Optional[list[str]] = None,
     ) -> list[dict]:
         """Search policies with filters.
 
@@ -146,6 +189,10 @@ class PolicyStore:
         matching answers mid-word fragments differently, so the FTS index is
         deliberately NOT used here; it exists for the upcoming free-text
         search feature, where new semantics belong.
+
+        ``exclude_review_status``/``review_status_in`` are the public review
+        visibility clamp (src/api/review_visibility.py) — additive filters
+        that combine with ``review_status`` rather than replace it.
         """
         conditions: list[str] = []
         params: list = []
@@ -171,6 +218,12 @@ class PolicyStore:
             conditions.append("lifecycle_stage = ?")
             params.append(lifecycle_stage)
 
+        visibility_conditions, visibility_params = _review_status_conditions(
+            exclude_review_status, review_status_in
+        )
+        conditions.extend(visibility_conditions)
+        params.extend(visibility_params)
+
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         query += " ORDER BY rowid"
@@ -187,6 +240,8 @@ class PolicyStore:
         review_status: Optional[str] = None,
         lifecycle_stage: Optional[str] = None,
         limit: int = 50,
+        exclude_review_status: Optional[str] = None,
+        review_status_in: Optional[list[str]] = None,
     ) -> list[dict]:
         """Free-text search across policy name, summary, key requirements,
         and jurisdiction, ANDing every whitespace-separated token of
@@ -198,6 +253,9 @@ class PolicyStore:
         same filters, same result shape either way. Malicious or malformed
         query text (quotes, parentheses, boolean operators) is neutralized
         by quoting, never raised.
+
+        ``exclude_review_status``/``review_status_in`` are the public review
+        visibility clamp (src/api/review_visibility.py).
         """
         query = (query or "").strip()
         if not query:
@@ -222,6 +280,12 @@ class PolicyStore:
         if lifecycle_stage:
             conditions.append("policies.lifecycle_stage = ?")
             params.append(lifecycle_stage)
+
+        visibility_conditions, visibility_params = _review_status_conditions(
+            exclude_review_status, review_status_in, column="policies.review_status"
+        )
+        conditions.extend(visibility_conditions)
+        params.extend(visibility_params)
 
         if storage_db.fts5_enabled(self._conn):
             match_query = storage_db.build_fts_match_query(query)

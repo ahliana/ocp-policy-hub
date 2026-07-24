@@ -9,13 +9,15 @@ import AgentChatPanel from './AgentChatPanel';
 import ApiKeySettingsModal from './ApiKeySettingsModal';
 import DomainScanPanel from './DomainScanPanel';
 import PolicyScannerHeader from './PolicyScannerHeader';
+import PublicVisibilityControl from './PublicVisibilityControl';
 import ReviewInbox from './ReviewInbox';
 import SearchPanel from './SearchPanel';
 import WorldMap from './WorldMap';
 
 function AgentPanel({
     adminRequired = false, hasAdminToken = false, onAdminTokenChange,
-    onViewPlacePolicies,
+    onViewPlacePolicies, publicView = 'all', onPublicViewChange,
+    showPublicViewToggle = false,
 }) {
     const [selectedRegions, setSelectedRegions] = useState([]);
     const [mode, setMode] = useState('standard');
@@ -123,6 +125,9 @@ function AgentPanel({
                 onSelectPlace={handleSelectPlace}
                 onViewPlacePolicies={onViewPlacePolicies}
                 showScanAction={adminOpen && adminUnlocked}
+                publicView={publicView}
+                onPublicViewChange={onPublicViewChange}
+                showPublicViewToggle={showPublicViewToggle}
             />
             <ApiKeySettingsModal
                 open={isSettingsOpen}
@@ -152,6 +157,7 @@ function AgentPanel({
                             API key settings
                         </button>
                     </div>
+                    <PublicVisibilityControl />
                     <SearchPanel
                         hasApiKey={hasApiKey}
                         isBusy={isBusy}

@@ -10,8 +10,11 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from ..deps import get_config, get_cost_settings_store, get_scan_manager
+from ..deps import (
+    get_config, get_cost_settings_store, get_public_visibility_store, get_scan_manager,
+)
 from ...storage.cost_settings import CostSettings
+from ...storage.public_visibility import PostureMode, PublicVisibilitySettings
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -193,6 +196,27 @@ def update_cost_settings(
         **updated.model_dump(),
         "models": cost_store.resolved_models(),
     }
+
+
+class PublicVisibilityUpdate(BaseModel):
+    mode: PostureMode
+
+
+@router.get("/public-visibility")
+def get_public_visibility(store=Depends(get_public_visibility_store)):
+    """Current public review visibility posture (see storage/public_visibility.py)."""
+    return {"mode": store.get().mode}
+
+
+@router.put("/public-visibility")
+def update_public_visibility(
+    payload: PublicVisibilityUpdate,
+    store=Depends(get_public_visibility_store),
+):
+    """Set the posture (admin-gated by the middleware). Invalid modes 422 via
+    the Literal type before this body ever runs."""
+    updated = store.update(PublicVisibilitySettings(mode=payload.mode))
+    return {"mode": updated.mode}
 
 
 @router.delete("/api-key")

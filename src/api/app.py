@@ -1,18 +1,18 @@
 """FastAPI application — REST API + WebSocket for OCP CE HR Policy Searcher."""
 
-import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from ..core.log_setup import setup_logging
+from .deps import get_public_visibility_store, request_is_admin
 from .routes import (
     domains, scans, policies, analysis, agent, ask, coverage, leads, logs,
     search, settings,
@@ -67,14 +67,6 @@ def admin_token_configured() -> bool:
 # (/api/tips: TIPS_RATE_PER_MINUTE/TIPS_DAILY_LIMIT; /api/ask: cost settings).
 _ADMIN_EXEMPT = {("POST", "/api/tips"), ("POST", "/api/ask")}
 
-# Loopback addresses trusted when ADMIN_TOKEN is unset.
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1"}
-# Starlette's TestClient has no real socket and reports its own host as the
-# literal string "testclient" — nearly the whole unit test suite runs with
-# ADMIN_TOKEN stripped (see tests/conftest.py) and exercises non-GET routes
-# through it, so it must be trusted the same as a real loopback caller.
-_TESTCLIENT_HOST = "testclient"
-
 
 class AdminGateMiddleware(BaseHTTPMiddleware):
     """Shared-token gate for state-changing endpoints.
@@ -90,6 +82,10 @@ class AdminGateMiddleware(BaseHTTPMiddleware):
     otherwise let any visitor start paid scans or replace the stored API
     key; a remote caller instead gets a 403 telling the operator to set
     ADMIN_TOKEN.
+
+    The admin/non-admin line itself is ``request_is_admin`` (src/api/deps.py),
+    shared with read routes that clamp what a non-admin sees (public review
+    visibility) rather than reimplemented here.
     """
 
     async def dispatch(self, request, call_next):
@@ -98,35 +94,23 @@ class AdminGateMiddleware(BaseHTTPMiddleware):
             and request.method not in ("GET", "HEAD", "OPTIONS")
             and (request.method, request.url.path) not in _ADMIN_EXEMPT
         ):
-            token = os.environ.get("ADMIN_TOKEN")
-            if token:
-                provided = request.headers.get("x-admin-token", "")
-                if not hmac.compare_digest(provided, token):
+            if not request_is_admin(request):
+                if os.environ.get("ADMIN_TOKEN"):
                     return JSONResponse(
                         status_code=401,
                         content={"detail": "Administrator token required"},
                     )
-            else:
-                # A forwarded header means the request traversed a reverse
-                # proxy (the deployment runs behind Caddy), so a loopback TCP
-                # peer is the proxy itself, not the operator - treat it as
-                # remote. Same reasoning as _client_ip in routes/ask.py.
-                forwarded = request.headers.get("x-forwarded-for") or request.headers.get(
-                    "x-real-ip"
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "detail": (
+                            "This server has no ADMIN_TOKEN configured, so "
+                            "admin actions are restricted to local requests. "
+                            "Set the ADMIN_TOKEN environment variable to "
+                            "allow this action remotely."
+                        ),
+                    },
                 )
-                host = request.client.host if request.client else ""
-                if forwarded or (host not in _LOOPBACK_HOSTS and host != _TESTCLIENT_HOST):
-                    return JSONResponse(
-                        status_code=403,
-                        content={
-                            "detail": (
-                                "This server has no ADMIN_TOKEN configured, so "
-                                "admin actions are restricted to local requests. "
-                                "Set the ADMIN_TOKEN environment variable to "
-                                "allow this action remotely."
-                            ),
-                        },
-                    )
         return await call_next(request)
 
 
@@ -179,8 +163,12 @@ def root():
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok", "admin_required": admin_token_configured()}
+def health(visibility_store=Depends(get_public_visibility_store)):
+    return {
+        "status": "ok",
+        "admin_required": admin_token_configured(),
+        "public_review_visibility": visibility_store.get().mode,
+    }
 
 
 # Serve the built React app (frontend/build) from this same process, if it

@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewInbox, { sortNewestFirst } from './ReviewInbox';
+import { setAdminToken } from '../utils/adminAuth';
 
 const NEW_POLICIES = [
     {
@@ -45,6 +46,7 @@ function mockFetch({ patchOk = true } = {}) {
 
 afterEach(() => {
     jest.restoreAllMocks();
+    setAdminToken(null);
 });
 
 describe('sortNewestFirst', () => {
@@ -78,6 +80,28 @@ describe('ReviewInbox', () => {
         });
         expect(screen.queryByText('Mark reviewed')).not.toBeInTheDocument();
         expect(screen.queryByText('Open review sheet')).not.toBeInTheDocument();
+    });
+
+    it('attaches the admin token to the new/promoted queue fetches', async () => {
+        // Under a reviewed_only public visibility posture, these GET calls
+        // must carry the admin header so the inbox still sees review_status
+        // =new items instead of a clamped view (see src/api/review_visibility.py).
+        setAdminToken('secret-token');
+        const fetchMock = mockFetch();
+        global.fetch = fetchMock;
+        render(<ReviewInbox isAdmin />);
+
+        await waitFor(() => {
+            expect(screen.getByText('New finds to review (2)')).toBeInTheDocument();
+        });
+
+        const queueCalls = fetchMock.mock.calls.filter(
+            ([url]) => String(url).includes('review_status='),
+        );
+        expect(queueCalls.length).toBeGreaterThan(0);
+        for (const [, options] of queueCalls) {
+            expect(options?.headers?.['X-Admin-Token']).toBe('secret-token');
+        }
     });
 
     it('lets an admin open the sheet and mark items reviewed', async () => {

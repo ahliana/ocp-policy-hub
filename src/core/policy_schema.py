@@ -58,6 +58,11 @@ STAGING_HEADERS = MASTER_HEADERS + EXTRA_HEADERS
 # staged rows against this column, so keep it in sync with the "Link" mapping.
 LINK_HEADER = "Link"
 
+# Header of the review-status column — the sheet reconciliation pass
+# (SheetsClient.update_review_statuses) writes a rejected policy's status
+# here by URL match.
+REVIEW_STATUS_HEADER = "Review Status"
+
 # Label rows this tool auto-generates, so a curator knows the provenance.
 ADDED_BY = "PolicyPulse (automated)"
 

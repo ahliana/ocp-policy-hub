@@ -71,4 +71,29 @@ describe('useCoverageChildren', () => {
     rerender({ slug: 'belgium' });
     await waitFor(() => expect(result.current.data?.parent.slug).toBe('belgium'));
   });
+
+  it('carries a review param on the request when provided', async () => {
+    const fetchMock = jest.fn(async (url) => {
+      expect(new URL(String(url)).searchParams.get('review')).toBe('reviewed');
+      return { ok: true, json: async () => CHILDREN_RESPONSE };
+    });
+    global.fetch = fetchMock;
+
+    renderHook(() => useCoverageChildren('us', 'reviewed'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  });
+
+  it('refetches when the review param changes', async () => {
+    const fetchMock = jest.fn(async () => ({ ok: true, json: async () => CHILDREN_RESPONSE }));
+    global.fetch = fetchMock;
+
+    const { rerender } = renderHook(
+      ({ review }) => useCoverageChildren('us', review),
+      { initialProps: { review: 'all' } },
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    rerender({ review: 'reviewed' });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
 });

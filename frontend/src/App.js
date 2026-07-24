@@ -19,6 +19,11 @@ function App() {
   const [adminRequired, setAdminRequired] = useState(false);
   const [hasAdminToken, setHasAdminToken] = useState(Boolean(getAdminToken()));
   const [placePolicyRequest, setPlacePolicyRequest] = useState(null);
+  // Public review visibility (WP-3): posture comes from /health, publicView
+  // is the reader-facing toggle it seeds — 'reviewed_only' locks the toggle
+  // to 'reviewed' and hides the switch (see WorldMap/PolicyList).
+  const [visibilityPosture, setVisibilityPosture] = useState('default_all');
+  const [publicView, setPublicView] = useState('all');
 
   const handleViewPlacePolicies = useCallback(({ slug, name }) => {
     setPlacePolicyRequest({ slug, name, nonce: Date.now() });
@@ -35,6 +40,9 @@ function App() {
         if (!response.ok) throw new Error();
         const data = await response.json();
         setAdminRequired(Boolean(data.admin_required));
+        const posture = data.public_review_visibility || 'default_all';
+        setVisibilityPosture(posture);
+        setPublicView(posture === 'default_all' ? 'all' : 'reviewed');
       } catch {
         setAdminRequired(false);
       }
@@ -101,13 +109,16 @@ function App() {
             hasAdminToken={hasAdminToken}
             onAdminTokenChange={refreshAdminTokenStatus}
             onViewPlacePolicies={handleViewPlacePolicies}
+            publicView={publicView}
+            onPublicViewChange={setPublicView}
+            showPublicViewToggle={visibilityPosture !== 'reviewed_only'}
           />
         </section>
         <section className="app-stage" aria-label="Ask about policies">
           <AskPolicyBox />
         </section>
         <section className="app-stage" aria-label="Discovered policies">
-          <PolicyList externalPlace={placePolicyRequest} />
+          <PolicyList externalPlace={placePolicyRequest} publicView={publicView} />
           <LeadsInbox adminRequired={adminRequired} hasAdminToken={hasAdminToken} />
         </section>
       </main>

@@ -51,7 +51,7 @@ function Admin1Path({ item, onHover, onHoverEnd, onSelect }) {
 // with, and which countries have admin-1 geometry at all.
 function CountryView({
   slug, countryName, load, onBack, onSelectPlace,
-  onViewPlacePolicies, showScanAction = true,
+  onViewPlacePolicies, showScanAction = true, publicView = 'all',
 }) {
   const holderRef = useRef(null);
   const svgRef = useRef(null);
@@ -62,7 +62,7 @@ function CountryView({
   const [selection, setSelection] = useState(null);
 
   const { data: childrenData, error: childrenError, isLoading: childrenLoading } = (
-    useCoverageChildren(slug)
+    useCoverageChildren(slug, publicView)
   );
 
   useEffect(() => {
