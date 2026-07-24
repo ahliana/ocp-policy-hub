@@ -1,4 +1,57 @@
-import { DEFAULT_CHANNELS, buildChannels } from './scanTargets';
+import { DEFAULT_CHANNELS, buildChannels, describeSelectionLabels, formatLabel } from './scanTargets';
+
+describe('formatLabel', () => {
+  it('applies known overrides', () => {
+    expect(formatLabel('eu')).toBe('EU');
+    expect(formatLabel('us')).toBe('United States');
+  });
+
+  it('title-cases and de-underscores unknown values', () => {
+    expect(formatLabel('nordic_baltics')).toBe('Nordic Baltics');
+  });
+
+  it('returns empty string for falsy input', () => {
+    expect(formatLabel('')).toBe('');
+    expect(formatLabel(undefined)).toBe('');
+  });
+});
+
+describe('describeSelectionLabels', () => {
+  it('formats a bare group id', () => {
+    expect(describeSelectionLabels(['group:eu'])).toEqual(['EU']);
+  });
+
+  it('formats a group+region selection using the region, not the group', () => {
+    expect(describeSelectionLabels(['group:quick:region:eu'])).toEqual(['EU']);
+  });
+
+  it('formats a plain region id', () => {
+    expect(describeSelectionLabels(['region:us'])).toEqual(['United States']);
+  });
+
+  it('formats a category selection', () => {
+    expect(describeSelectionLabels(['category:energy_ministry']))
+      .toEqual(['Category: Energy Ministry']);
+  });
+
+  it('formats a tag selection', () => {
+    expect(describeSelectionLabels(['tag:incentive'])).toEqual(['Tag: Incentive']);
+  });
+
+  it('formats a bare domain id', () => {
+    expect(describeSelectionLabels(['legiscan_api'])).toEqual(['Legiscan Api']);
+  });
+
+  it('preserves order across a mixed selection', () => {
+    expect(describeSelectionLabels(['group:eu', 'tag:incentive', 'category:energy_ministry']))
+      .toEqual(['EU', 'Tag: Incentive', 'Category: Energy Ministry']);
+  });
+
+  it('returns an empty array for no selection', () => {
+    expect(describeSelectionLabels([])).toEqual([]);
+    expect(describeSelectionLabels(undefined)).toEqual([]);
+  });
+});
 
 describe('DEFAULT_CHANNELS', () => {
   it('defaults to crawl, law_apis, and transposition', () => {

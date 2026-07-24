@@ -5,6 +5,7 @@ import Typography from '@mui/material/Typography';
 import { SimpleTreeView } from '@mui/x-tree-view/SimpleTreeView';
 import { TreeItem, treeItemClasses } from '@mui/x-tree-view/TreeItem';
 import { apiUrl } from '../config/api';
+import { formatLabel } from '../utils/scanTargets';
 
 const SELECTION_GREEN = '#8dc63f';
 const SELECTION_GREEN_SOFT = '#f6fbf0';
@@ -16,17 +17,6 @@ const TOP_LEVEL_IDS = new Set([
   'section:domains',
 ]);
 
-const LABEL_OVERRIDES = {
-  all: 'All',
-  apac: 'APAC',
-  eu: 'EU',
-  uk: 'United Kingdom',
-  us: 'United States',
-  uae: 'United Arab Emirates',
-  dach: 'DACH',
-  nordic: 'Nordic',
-};
-
 // Internal QA groups from groups.yaml that end users should never scan
 const HIDDEN_GROUP_PATTERN = /^(test($|_)|sample($|_))/;
 
@@ -34,14 +24,10 @@ export function isHiddenGroup(groupId) {
   return HIDDEN_GROUP_PATTERN.test(groupId);
 }
 
-export function formatLabel(value) {
-  if (!value) return '';
-  if (LABEL_OVERRIDES[value]) return LABEL_OVERRIDES[value];
-
-  return value
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
+// Re-exported for callers (and RegionSelector.test.js) that historically
+// imported formatLabel from here - the single implementation now lives in
+// utils/scanTargets.js, shared with the scan-scope summary line.
+export { formatLabel };
 
 function countDomainsByValue(domains, getter) {
   const counts = new Map();

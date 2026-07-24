@@ -152,4 +152,34 @@ describe('useCostEstimate', () => {
     await waitFor(() => expect(result.current.costStatus).toBe('ready'));
     expect(result.current.costEstimateText).not.toBe('Cost estimates are only available in standard mode.');
   });
+
+  describe('domainCount (WP-6 scan-scope summary)', () => {
+    it('is null while loading', () => {
+      global.fetch = jest.fn(() => new Promise(() => {})); // never resolves
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      expect(result.current.domainCount).toBeNull();
+    });
+
+    it('is null when idle (nothing selected)', () => {
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: [], mode: 'standard' }));
+      expect(result.current.domainCount).toBeNull();
+    });
+
+    it('exposes the estimate response domain_count once ready', async () => {
+      global.fetch = jest.fn(async () => jsonResponse(200, ESTIMATE_RESPONSE));
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('ready'));
+      expect(result.current.domainCount).toBe(5);
+    });
+
+    it('is null again after an error response', async () => {
+      global.fetch = jest.fn(async () => jsonResponse(400, {}));
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('bad_scope'));
+      expect(result.current.domainCount).toBeNull();
+    });
+  });
 });

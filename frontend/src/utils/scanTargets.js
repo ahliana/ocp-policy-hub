@@ -1,5 +1,29 @@
 import { apiUrl } from '../config/api';
 
+// Human-readable overrides for values whose formatted-from-slug form reads
+// oddly (acronyms, multi-word proper nouns). Shared by RegionSelector (tree
+// labels) and describeSelectionLabels below (the scan-scope summary line) so
+// the same value always reads the same way in both places.
+const LABEL_OVERRIDES = {
+    all: 'All',
+    apac: 'APAC',
+    eu: 'EU',
+    uk: 'United Kingdom',
+    us: 'United States',
+    uae: 'United Arab Emirates',
+    dach: 'DACH',
+    nordic: 'Nordic',
+};
+
+export function formatLabel(value) {
+    if (!value) return '';
+    if (LABEL_OVERRIDES[value]) return LABEL_OVERRIDES[value];
+
+    return value
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export function splitSelection(items) {
     return {
         categories: items
@@ -38,6 +62,25 @@ export function parseDomainTarget(item) {
         group: item.slice('group:'.length, markerIndex),
         region: item.slice(markerIndex + regionMarker.length),
     };
+}
+
+// Human-readable label for one raw selection value ("group:eu",
+// "group:quick:region:eu", "category:energy_ministry", "tag:incentive", or a
+// bare domain/region id) - feeds the scan-scope summary line so an admin can
+// see in plain language what's about to be scanned.
+export function describeSelectionLabel(item) {
+    if (item.startsWith('category:')) {
+        return `Category: ${formatLabel(item.slice('category:'.length))}`;
+    }
+    if (item.startsWith('tag:')) {
+        return `Tag: ${formatLabel(item.slice('tag:'.length))}`;
+    }
+    const { group, region } = parseDomainTarget(item);
+    return formatLabel(region || group);
+}
+
+export function describeSelectionLabels(selectedItems) {
+    return (selectedItems || []).map(describeSelectionLabel);
 }
 
 export async function resolveDomainsForTargets(targets) {

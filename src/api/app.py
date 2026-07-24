@@ -14,8 +14,8 @@ from starlette.responses import JSONResponse
 from ..core.log_setup import setup_logging
 from .deps import get_public_visibility_store, request_is_admin
 from .routes import (
-    domains, scans, policies, analysis, agent, ask, coverage, leads, logs,
-    search, settings,
+    domains, scans, policies, analysis, agent, ask, coverage, cost_projection,
+    leads, logs, search, settings,
 )
 from .static_site import mount_frontend
 
@@ -138,6 +138,7 @@ app.include_router(analysis.router)
 app.include_router(agent.router)
 app.include_router(ask.router)
 app.include_router(coverage.router)
+app.include_router(cost_projection.router)
 app.include_router(leads.router)
 app.include_router(logs.router)
 app.include_router(search.router)

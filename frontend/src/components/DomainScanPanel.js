@@ -3,6 +3,7 @@ import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import FormGroup from '@mui/material/FormGroup';
 import Tooltip from '@mui/material/Tooltip';
+import { describeSelectionLabels, splitSelection } from '../utils/scanTargets';
 import ModeSelector from './ModeSelector';
 import RegionSelector from './RegionSelector';
 
@@ -23,6 +24,7 @@ function DomainScanPanel({
     onChannelsChange,
     costStatus,
     costEstimateText,
+    sourceCount,
     isBusy,
     hasApiKey,
     isQueueRunning,
@@ -38,6 +40,20 @@ function DomainScanPanel({
             : channels.filter((id) => id !== channelId);
         onChannelsChange(nextChannels);
     };
+
+    // What-you-launch-is-unambiguous summary, kept directly above the
+    // Scan/Stop buttons. sourceCount is the cost estimate's domain_count
+    // once that request is ready (the backend's actual resolved-domain
+    // count - the single source of truth); while it's loading/idle/absent,
+    // fall back to the number of scope entries currently selected so the
+    // line still shows a number rather than "unknown".
+    const selectionLabels = describeSelectionLabels(selectedRegions);
+    const scopeText = selectionLabels.length > 0 ? selectionLabels.join(', ') : 'nothing selected';
+    const resolvedSourceCount = sourceCount != null
+        ? sourceCount
+        : splitSelection(selectedRegions || []).targets.length;
+    const sourceLabel = `${resolvedSourceCount} source${resolvedSourceCount === 1 ? '' : 's'}`;
+    const scanScopeSummary = `Scanning: ${scopeText} - ${sourceLabel} - ${costEstimateText}`;
 
     return (
         <div className="domain-scan" aria-label="Domain scan">
@@ -87,6 +103,7 @@ function DomainScanPanel({
                     </output>
                 </Tooltip>
             </div>
+            <p className="scan-scope-summary" aria-live="polite">{scanScopeSummary}</p>
             <div className="agent-action-row">
                 <button
                     type="button"

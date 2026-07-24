@@ -81,6 +81,13 @@ def get_public_visibility_store():
 
 
 @lru_cache()
+def get_scan_history_store():
+    from ..storage.scan_history import ScanHistoryStore
+    data_dir = os.environ.get("OCP_DATA_DIR", "data")
+    return ScanHistoryStore(data_dir=data_dir)
+
+
+@lru_cache()
 def get_scan_manager() -> ScanManager:
     config = get_config()
     broadcaster = get_broadcaster()

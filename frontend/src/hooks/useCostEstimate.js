@@ -125,6 +125,11 @@ function useCostEstimate({ selectedRegions, mode }) {
     return {
         costStatus,
         costEstimateText,
+        // The estimate's domain_count - the backend's actual resolved-domain
+        // count for the current selection, and the single source of truth
+        // for the scan-scope summary line (WP-6) once it's ready. null while
+        // loading/idle/erroring, so callers know to fall back.
+        domainCount: costStatus === 'ready' && costEstimate ? costEstimate.target_count : null,
     };
 }
 

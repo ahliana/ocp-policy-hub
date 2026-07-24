@@ -27,6 +27,7 @@ from ..core.models import (
 )
 from ..core.scanner import DomainScanner
 from ..core.verifier import Verifier
+from ..storage.scan_history import ScanHistoryStore
 from ..storage.store import PolicyStore
 from .auditor import Auditor
 from .events import EventBroadcaster
@@ -245,6 +246,18 @@ class ScanManager:
             scan_id=scan_id,
             domain_count=len(domains),
             domain_group=job.domain_group,
+        )
+
+        # Persisted scan history (WP-5) — a row per scan, next to the audit
+        # trail above. Written at start, updated at completion/failure/
+        # cancellation (see the three record_completion() calls below).
+        history = ScanHistoryStore(data_dir=self.data_dir)
+        history.record_start(
+            scan_id=scan_id,
+            domain_group=job.domain_group,
+            mode="deep" if job.options.get("deep") else "standard",
+            channels=job.options.get("channels", []),
+            started_at=job.started_at,
         )
 
         await self.broadcaster.broadcast(ScanEvent(
@@ -596,6 +609,16 @@ class ScanManager:
                     if job.started_at else None
                 ),
             )
+            history.record_completion(
+                scan_id=scan_id,
+                status="completed",
+                completed_at=job.completed_at,
+                domains_scanned=len(domains),
+                policies_found=len(all_policies),
+                cost_usd=job.cost.total_usd if job.cost else 0,
+                input_tokens=job.cost.input_tokens if job.cost else None,
+                output_tokens=job.cost.output_tokens if job.cost else None,
+            )
 
             await self.broadcaster.broadcast(ScanEvent(
                 scan_id=scan_id,
@@ -610,10 +633,30 @@ class ScanManager:
         except asyncio.CancelledError:
             job.status = ScanStatus.CANCELLED
             job.completed_at = datetime.utcnow()
+            history.record_completion(
+                scan_id=scan_id,
+                status="cancelled",
+                completed_at=job.completed_at,
+                domains_scanned=len(domains),
+                policies_found=len(self._policies.get(scan_id, [])),
+                cost_usd=job.cost.total_usd if job.cost else 0,
+                input_tokens=job.cost.input_tokens if job.cost else None,
+                output_tokens=job.cost.output_tokens if job.cost else None,
+            )
         except Exception as e:
             logger.error(f"Scan {scan_id} failed: {e}")
             job.status = ScanStatus.FAILED
             job.completed_at = datetime.utcnow()
+            history.record_completion(
+                scan_id=scan_id,
+                status="failed",
+                completed_at=job.completed_at,
+                domains_scanned=len(domains),
+                policies_found=len(self._policies.get(scan_id, [])),
+                cost_usd=job.cost.total_usd if job.cost else 0,
+                input_tokens=job.cost.input_tokens if job.cost else None,
+                output_tokens=job.cost.output_tokens if job.cost else None,
+            )
             await self.broadcaster.broadcast(ScanEvent(
                 scan_id=scan_id,
                 type="error",

@@ -98,6 +98,25 @@ CREATE TABLE IF NOT EXISTS jurisdictions (
     iso_numeric TEXT,
     parent TEXT
 );
+
+CREATE TABLE IF NOT EXISTS scans (
+    scan_id TEXT PRIMARY KEY,
+    domain_group TEXT,
+    mode TEXT,
+    channels TEXT,
+    status TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    domains_scanned INTEGER,
+    policies_found INTEGER,
+    cost_usd REAL,
+    input_tokens INTEGER,
+    output_tokens INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_scans_domain_group ON scans(domain_group);
+CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);
+CREATE INDEX IF NOT EXISTS idx_scans_started_at ON scans(started_at);
 """
 
 _SCHEMA_FTS5 = """

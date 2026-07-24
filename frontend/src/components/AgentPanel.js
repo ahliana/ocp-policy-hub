@@ -7,6 +7,7 @@ import { DEFAULT_CHANNELS, buildScanRequests } from '../utils/scanTargets';
 import AdminSignInDialog from './AdminSignInDialog';
 import AgentChatPanel from './AgentChatPanel';
 import ApiKeySettingsModal from './ApiKeySettingsModal';
+import CostPlanner from './CostPlanner';
 import DomainScanPanel from './DomainScanPanel';
 import LibraryView from './LibraryView';
 import PolicyScannerHeader from './PolicyScannerHeader';
@@ -55,7 +56,7 @@ function AgentPanel({
     const { wsRef, isChatRunning, setIsChatRunning } = useAgentSocket({
         onNotice: pushNotice,
     });
-    const { costStatus, costEstimateText } = useCostEstimate({
+    const { costStatus, costEstimateText, domainCount } = useCostEstimate({
         selectedRegions,
         mode,
     });
@@ -169,7 +170,7 @@ function AgentPanel({
                         adminRequired={adminRequired}
                         externalPlace={placeRequest}
                     />
-                    <details className="advanced-scan">
+                    <details className="advanced-scan" open>
                         <summary className="advanced-scan-summary">
                             Advanced: pick individual regions and sources
                         </summary>
@@ -182,6 +183,7 @@ function AgentPanel({
                             onChannelsChange={setChannels}
                             costStatus={costStatus}
                             costEstimateText={costEstimateText}
+                            sourceCount={domainCount}
                             isBusy={isBusy}
                             hasApiKey={hasApiKey}
                             isQueueRunning={isQueueRunning}
@@ -200,6 +202,7 @@ function AgentPanel({
                     />
                     <ReviewInbox isAdmin={adminUnlocked} />
                     <LibraryView />
+                    <CostPlanner />
                 </div>
             ) : (
                 <p className="admin-readonly-note" role="status">

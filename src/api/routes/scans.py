@@ -1,16 +1,23 @@
 """Scan endpoints — start/stop/status + WebSocket progress."""
 
 import os
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import (
+    APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, Query,
+)
 
 from ...agent.discovery import build_discovery_prompt
 from ...agent.orchestrator import PolicyAgent
-from ..deps import get_cost_settings_store, get_scan_manager, get_broadcaster, get_policy_store
+from ..deps import (
+    get_cost_settings_store, get_scan_manager, get_broadcaster, get_policy_store,
+    get_scan_history_store, request_is_admin,
+)
 from ...core.config import ConfigurationError
 from ...core.models import ScanRequest
 from ...orchestration.events import EventBroadcaster
 from ...orchestration.scan_manager import ScanManager
+from ...storage.scan_history import ScanHistoryStore
 from ...storage.store import PolicyStore
 
 router = APIRouter(prefix="/api", tags=["scans"])
@@ -121,6 +128,37 @@ def list_scans(manager: ScanManager = Depends(get_scan_manager)):
         }
         for job in manager.jobs.values()
     ]
+
+
+@router.get("/scans/history")
+def scan_history(
+    request: Request,
+    domain_group: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    history: ScanHistoryStore = Depends(get_scan_history_store),
+):
+    """Persisted scan run history (WP-5) — an admin-only review surface.
+
+    Because it's a GET, ``AdminGateMiddleware`` doesn't gate it (that
+    middleware only covers non-GET requests), so the admin check happens
+    here instead — a non-admin caller gets 403, mirroring
+    GET /api/policies/library.
+
+    Declared ahead of GET /scans/{scan_id} so "/api/scans/history" always
+    resolves here rather than being captured as scan_id="history".
+
+    Response includes ``total`` (all rows matching domain_group/status,
+    ignoring limit/offset) alongside the page — the same shape as
+    GET /api/policies/library, so a paginated UI never needs a second
+    round trip just to know how many pages there are.
+    """
+    if not request_is_admin(request):
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    scans = history.list(domain_group=domain_group, status=status, limit=limit, offset=offset)
+    total = history.count(domain_group=domain_group, status=status)
+    return {"scans": scans, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/scans/{scan_id}")

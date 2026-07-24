@@ -119,3 +119,14 @@ describe('AgentPanel Library gating', () => {
     expect(await screen.findByText(/Library - everything in the database/i)).toBeInTheDocument();
   });
 });
+
+describe('AgentPanel Advanced scan-scope disclosure (WP-6)', () => {
+  it('the "Advanced: pick individual regions and sources" details is open by default once the admin area is open', async () => {
+    renderPanel({ adminRequired: false, hasAdminToken: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Admin' }));
+
+    const summary = await screen.findByText('Advanced: pick individual regions and sources');
+    const details = summary.closest('details');
+    expect(details).toHaveAttribute('open');
+  });
+});
