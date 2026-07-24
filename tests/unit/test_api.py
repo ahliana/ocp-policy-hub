@@ -346,6 +346,45 @@ class TestScanRoutes:
         assert response.status_code == 200
         assert response.json() == []
 
+    def test_cost_estimate_unknown_scope_returns_400(self, client, mock_manager):
+        from src.core.config import ConfigurationError
+
+        mock_manager.estimate_cost.side_effect = ConfigurationError(
+            "Unknown group/region/domain: 'bogus'"
+        )
+        response = client.post("/api/cost-estimate?domains=bogus")
+        assert response.status_code == 400
+        assert "bogus" in response.json()["detail"]
+
+    def test_cost_estimate_valid_scope_returns_shape(self, client, mock_manager):
+        mock_manager.estimate_cost.return_value = {
+            "domain_count": 3,
+            "estimated_pages": 300,
+            "estimated_keyword_passes": 30,
+            "estimated_screening_calls": 30,
+            "estimated_analysis_calls": 15,
+            "estimated_cost_usd": 1.23,
+        }
+        response = client.post("/api/cost-estimate?domains=quick")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["domain_count"] == 3
+        assert data["estimated_cost_usd"] == 1.23
+        mock_manager.estimate_cost.assert_called_once_with("quick", deep=False)
+
+    def test_cost_estimate_deep_flag_passed_through(self, client, mock_manager):
+        mock_manager.estimate_cost.return_value = {
+            "domain_count": 3,
+            "estimated_pages": 300,
+            "estimated_keyword_passes": 30,
+            "estimated_screening_calls": 30,
+            "estimated_analysis_calls": 15,
+            "estimated_cost_usd": 2.5,
+        }
+        response = client.post("/api/cost-estimate?domains=quick&deep=true")
+        assert response.status_code == 200
+        mock_manager.estimate_cost.assert_called_once_with("quick", deep=True)
+
     def test_list_scans_with_job(self, client, mock_manager):
         job = ScanJob(scan_id="s1", status=ScanStatus.COMPLETED, domain_count=2, policy_count=1)
         mock_manager.jobs = {"s1": job}

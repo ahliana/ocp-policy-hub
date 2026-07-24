@@ -63,11 +63,41 @@ test.describe('world map real-pointer flows', () => {
     await expect(page.locator('.saved-policy-name').first()).toBeVisible();
   });
 
+  test('zooming out past minimum returns to the world map', async ({ page }) => {
+    await page.getByRole('button', { name: US_NAME }).dblclick();
+    const california = page.getByRole('button', { name: /California: \d+ sources/ });
+    await expect(california).toBeVisible();
+    // boundingBox coordinates are viewport-relative and the map can sit
+    // below the fold - bring it into view and take fresh coordinates, or
+    // the wheels land on the page (scrolling it) instead of the map.
+    await california.scrollIntoViewIfNeeded();
+    const box = await california.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    // The drill-down opens fully zoomed out, so two real wheel-out notches
+    // cross the hysteresis threshold and must eject back to the world view.
+    // Spaced apart - back-to-back wheels in one frame can coalesce into a
+    // single event, which the hysteresis deliberately treats as one attempt.
+    // The drill-down opens fully zoomed out, so two real wheel-out notches
+    // cross the hysteresis threshold and must eject back to the world view.
+    // Spaced apart - back-to-back wheels in one frame can coalesce into a
+    // single event, which the hysteresis deliberately treats as one attempt.
+    await page.mouse.wheel(0, 120);
+    await page.waitForTimeout(150);
+    await page.mouse.wheel(0, 120);
+    await expect(page.getByRole('button', { name: US_NAME })).toBeVisible();
+  });
+
+  test('the World control button exits the drill-down', async ({ page }) => {
+    await page.getByRole('button', { name: US_NAME }).dblclick();
+    await page.getByRole('button', { name: 'Back to world map' }).click();
+    await expect(page.getByRole('button', { name: US_NAME })).toBeVisible();
+  });
+
   test('admin area toggles and hides operator tools by default', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'Find new policies' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Admin', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Find new policies' })).toBeVisible();
-    await page.getByRole('button', { name: 'Close admin' }).click();
+    await page.getByRole('button', { name: 'Exit admin' }).click();
     await expect(page.getByRole('heading', { name: 'Find new policies' })).toHaveCount(0);
   });
 });

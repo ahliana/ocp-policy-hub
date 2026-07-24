@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.core.config import ConfigurationError
 from src.core.models import Policy, PolicyType
 from src.orchestration.scan_manager import ScanManager
 from src.storage.store import PolicyStore
@@ -289,3 +290,61 @@ class TestRejectedUrlStatuses:
     def test_empty_store_yields_empty(self, tmp_path):
         store = PolicyStore(data_dir=str(tmp_path))
         assert ScanManager._rejected_url_statuses(store) == {}
+
+
+def _manager_with_config(get_enabled_domains_return=None, get_enabled_domains_side_effect=None):
+    config = MagicMock()
+    if get_enabled_domains_side_effect is not None:
+        config.get_enabled_domains.side_effect = get_enabled_domains_side_effect
+    else:
+        config.get_enabled_domains.return_value = get_enabled_domains_return
+    settings = MagicMock()
+    settings.crawl.max_pages_per_domain = 200
+    settings.analysis.min_keyword_score = 3.0
+    config.settings = settings
+    return ScanManager(config=config, broadcaster=MagicMock())
+
+
+class TestEstimateCost:
+    """ScanManager.estimate_cost() — WP-1 estimator repair.
+
+    Unknown scopes now raise ConfigurationError (caught by the API route and
+    turned into a 400, mirroring domains.py) instead of a raw 500. deep=True
+    applies the deep-scan page/keyword assumptions instead of the standard
+    ones, so it must always estimate a strictly higher cost for the same
+    scope.
+    """
+
+    def test_unknown_scope_raises_configuration_error(self):
+        manager = _manager_with_config(
+            get_enabled_domains_side_effect=ConfigurationError("Unknown group/region/domain: 'bogus'")
+        )
+        with pytest.raises(ConfigurationError):
+            manager.estimate_cost("bogus")
+
+    def test_valid_scope_returns_expected_shape(self):
+        domains = [{"id": f"d{i}", "name": f"D{i}"} for i in range(5)]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+
+        result = manager.estimate_cost("quick")
+
+        assert result["domain_count"] == 5
+        assert set(result.keys()) == {
+            "domain_count",
+            "estimated_pages",
+            "estimated_keyword_passes",
+            "estimated_screening_calls",
+            "estimated_analysis_calls",
+            "estimated_cost_usd",
+        }
+        assert result["estimated_cost_usd"] > 0
+
+    def test_deep_estimate_is_strictly_higher_than_standard(self):
+        domains = [{"id": f"d{i}", "name": f"D{i}"} for i in range(5)]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+
+        standard = manager.estimate_cost("quick", deep=False)
+        deep = manager.estimate_cost("quick", deep=True)
+
+        assert deep["estimated_cost_usd"] > standard["estimated_cost_usd"]
+        assert deep["estimated_pages"] > standard["estimated_pages"]

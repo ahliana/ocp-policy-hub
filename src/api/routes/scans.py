@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from ...agent.discovery import build_discovery_prompt
 from ...agent.orchestrator import PolicyAgent
 from ..deps import get_cost_settings_store, get_scan_manager, get_broadcaster, get_policy_store
+from ...core.config import ConfigurationError
 from ...core.models import ScanRequest
 from ...orchestration.events import EventBroadcaster
 from ...orchestration.scan_manager import ScanManager
@@ -184,7 +185,11 @@ async def scan_websocket(
 @router.post("/cost-estimate")
 def estimate_cost(
     domains: str = Query("quick"),
+    deep: bool = Query(False),
     manager: ScanManager = Depends(get_scan_manager),
 ):
     """Estimate API costs for a scan."""
-    return manager.estimate_cost(domains)
+    try:
+        return manager.estimate_cost(domains, deep=deep)
+    except ConfigurationError as e:
+        raise HTTPException(status_code=400, detail=str(e))

@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, fireEvent, renderHook } from '@testing-library/react';
 import usePanZoom, { WORLD_VIEWBOX, ZOOM_BOUNDS, panBy, zoomAt } from './usePanZoom';
 
 describe('zoomAt', () => {
@@ -175,6 +175,120 @@ describe('usePanZoom (hook integration)', () => {
       // Zooming toward a point in the far corner should pull the viewBox
       // origin toward that corner, not stay anchored on the world center.
       expect(viewBox.x).toBeLessThan(WORLD_VIEWBOX.w / 2 - viewBox.w / 2);
+    });
+  });
+
+  describe('onZoomOutBeyondMin (WP-2z zoom-out escape)', () => {
+    it('does not fire on a single zoom-out attempt already at minimum zoom', () => {
+      const onZoomOutBeyondMin = jest.fn();
+      const ref = { current: null };
+      const { result } = renderHook(() => usePanZoom(ref, { onZoomOutBeyondMin }));
+
+      act(() => result.current.zoomOut());
+
+      expect(onZoomOutBeyondMin).not.toHaveBeenCalled();
+    });
+
+    it('fires after 2 consecutive zoom-out attempts already at minimum zoom (hysteresis)', () => {
+      const onZoomOutBeyondMin = jest.fn();
+      const ref = { current: null };
+      const { result } = renderHook(() => usePanZoom(ref, { onZoomOutBeyondMin }));
+
+      act(() => result.current.zoomOut());
+      expect(onZoomOutBeyondMin).not.toHaveBeenCalled();
+
+      act(() => result.current.zoomOut());
+      expect(onZoomOutBeyondMin).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not fire when not at minimum zoom', () => {
+      const onZoomOutBeyondMin = jest.fn();
+      const ref = { current: null };
+      const { result } = renderHook(() => usePanZoom(ref, { onZoomOutBeyondMin }));
+
+      act(() => {
+        result.current.zoomIn();
+        result.current.zoomIn();
+        result.current.zoomIn();
+      });
+      act(() => result.current.zoomOut());
+
+      expect(onZoomOutBeyondMin).not.toHaveBeenCalled();
+    });
+
+    it('any zoom-in resets the accumulator', () => {
+      const onZoomOutBeyondMin = jest.fn();
+      const ref = { current: null };
+      const { result } = renderHook(() => usePanZoom(ref, { onZoomOutBeyondMin }));
+
+      act(() => result.current.zoomOut()); // counts 1 of 2 at the boundary
+      act(() => result.current.zoomIn()); // resets the accumulator, leaves the boundary
+      act(() => result.current.zoomOut()); // back at the boundary, this attempt itself isn't counted
+      expect(onZoomOutBeyondMin).not.toHaveBeenCalled();
+
+      // If the pre-reset attempt had NOT been cleared, this single further
+      // attempt would complete a stale count of 2 and fire early.
+      act(() => result.current.zoomOut());
+      expect(onZoomOutBeyondMin).not.toHaveBeenCalled();
+
+      act(() => result.current.zoomOut());
+      expect(onZoomOutBeyondMin).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not change zoomOut behavior when the option is absent', () => {
+      const ref = { current: null };
+      const { result } = renderHook(() => usePanZoom(ref));
+
+      act(() => {
+        result.current.zoomOut();
+        result.current.zoomOut();
+        result.current.zoomOut();
+      });
+
+      expect(result.current.viewBox).toEqual(WORLD_VIEWBOX);
+      expect(result.current.canZoomOut).toBe(false);
+    });
+
+    it('a wheel zoom-out at minimum zoom counts toward the same hysteresis', () => {
+      const onZoomOutBeyondMin = jest.fn();
+      const node = document.createElement('svg');
+      document.body.appendChild(node);
+      const ref = { current: node };
+      renderHook(() => usePanZoom(ref, { onZoomOutBeyondMin }));
+
+      const wheelOut = () => fireEvent.wheel(node, { deltaY: 100, clientX: 10, clientY: 10 });
+      act(() => wheelOut());
+      expect(onZoomOutBeyondMin).not.toHaveBeenCalled();
+
+      act(() => wheelOut());
+      expect(onZoomOutBeyondMin).toHaveBeenCalledTimes(1);
+
+      document.body.removeChild(node);
+    });
+
+    it('attaches the wheel listener when the svg mounts later than the first render', () => {
+      // Regression: CountryView's svg mounts only after BOTH geometry and
+      // children coverage load. If the attach effect's deps all settled
+      // while the ref was still null, wheel zoom was silently dead. The
+      // `active` config flag re-fires the effect in the mounting render.
+      const onZoomOutBeyondMin = jest.fn();
+      const ref = { current: null };
+      const { rerender } = renderHook(
+        ({ active }) => usePanZoom(ref, { onZoomOutBeyondMin, active }),
+        { initialProps: { active: false } },
+      );
+
+      const node = document.createElement('svg');
+      document.body.appendChild(node);
+      ref.current = node;
+      rerender({ active: true });
+
+      const wheelOut = () => fireEvent.wheel(node, { deltaY: 100, clientX: 10, clientY: 10 });
+      act(() => wheelOut());
+      act(() => wheelOut());
+      expect(onZoomOutBeyondMin).toHaveBeenCalledTimes(1);
+
+      document.body.removeChild(node);
     });
   });
 });

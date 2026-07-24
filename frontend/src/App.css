@@ -235,11 +235,13 @@ select,
 
 .cost-estimate.loading,
 .cost-estimate.filters_only,
-.cost-estimate.standard_only {
+.cost-estimate.discover {
   color: #555;
 }
 
-.cost-estimate.error {
+.cost-estimate.error,
+.cost-estimate.unauthorized,
+.cost-estimate.bad_scope {
   border-color: #d26b6b;
   color: #8a1f1f;
 }
@@ -321,6 +323,22 @@ select,
   grid-column: 1 / -1;
   display: grid;
   gap: 16px;
+  padding: 16px;
+  border: 2px solid #e0a640;
+  border-radius: 10px;
+  background-color: #fffaf0;
+}
+
+.admin-mode-banner {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid #e0a640;
+  border-radius: 6px;
+  background-color: #fdecc8;
+  color: #7a4a06;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .admin-area-actions {

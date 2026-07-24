@@ -15,7 +15,7 @@ function PolicyScannerHeader({ onToggleAdmin, adminOpen = false }) {
                 onClick={onToggleAdmin}
                 aria-expanded={adminOpen}
             >
-                {adminOpen ? 'Close admin' : 'Admin'}
+                {adminOpen ? 'Exit admin' : 'Admin'}
             </button>
         </div>
     );

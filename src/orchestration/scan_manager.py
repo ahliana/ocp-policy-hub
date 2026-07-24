@@ -635,14 +635,32 @@ class ScanManager:
             return True
         return False
 
-    def estimate_cost(self, domains_group: str) -> dict:
-        """Estimate API costs for a scan."""
+    # Deep scans lower min_keyword_score from the standard baseline (5.0, the
+    # keywords.yaml default) to 2.0 (see _with_deep_scan_defaults), which lets
+    # noticeably more pages pass the keyword gate. Assumption: that roughly
+    # doubles the pass rate used for the standard estimate below.
+    DEEP_KEYWORD_PASS_RATE = 0.20
+
+    def estimate_cost(self, domains_group: str, deep: bool = False) -> dict:
+        """Estimate API costs for a scan.
+
+        Raises ConfigurationError (via get_enabled_domains) for an unknown
+        group/region/domain scope — callers (the API route) turn that into a
+        400, mirroring domains.py's list_domains.
+        """
         domains = self.config.get_enabled_domains(domains_group)
         settings = self.config.settings
 
-        est_pages_per_domain = settings.crawl.max_pages_per_domain // 2
-        total_pages = len(domains) * est_pages_per_domain
+        max_pages_per_domain = settings.crawl.max_pages_per_domain
         keyword_pass_rate = 0.10
+        if deep:
+            # Reuse _with_deep_scan_defaults as the single source of truth for
+            # the deep-scan max_pages value instead of duplicating it here.
+            max_pages_per_domain = self._with_deep_scan_defaults({})["max_pages"]
+            keyword_pass_rate = self.DEEP_KEYWORD_PASS_RATE
+
+        est_pages_per_domain = max_pages_per_domain // 2
+        total_pages = len(domains) * est_pages_per_domain
         screening_pass_rate = 0.50
 
         keyword_passes = int(total_pages * keyword_pass_rate)

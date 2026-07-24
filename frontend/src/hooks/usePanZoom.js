@@ -75,7 +75,18 @@ function pinchState(pointers) {
 // own admin-1 viewBox/bounds (see CountryView.js) so the same drag/wheel/
 // pinch/keyboard interactions work at any scale.
 function usePanZoom(svgRef, config) {
-  const { viewBox: initialViewBox = WORLD_VIEWBOX, bounds = ZOOM_BOUNDS } = config || {};
+  const {
+    viewBox: initialViewBox = WORLD_VIEWBOX,
+    bounds = ZOOM_BOUNDS,
+    onZoomOutBeyondMin,
+    // Flip this false->true in the same render that mounts the svg. The
+    // wheel listener attaches via addEventListener (it must, for
+    // passive:false), so if the svg mounts in a LATER render than the one
+    // that changed this hook's other deps, the attach effect has already
+    // run against a null ref and never re-fires - wheel zoom silently dead
+    // (the CountryView geometry-vs-coverage load race).
+    active = true,
+  } = config || {};
   const [viewBox, setViewBox] = useState(initialViewBox);
   // Mirrors `viewBox` but updated eagerly (not via a post-render effect) so
   // synchronous back-to-back calls - e.g. two quick clicks on the zoom
@@ -102,6 +113,22 @@ function usePanZoom(svgRef, config) {
   const pointersRef = useRef(new Map()); // pointerId -> {x, y}, for pinch
   const pinchRef = useRef(null); // { distance, cx, cy }
   const animationFrameRef = useRef(null);
+  // Consecutive zoom-out attempts made while already at minimum zoom (fully
+  // zoomed out). Requiring 2 in a row before firing onZoomOutBeyondMin is
+  // hysteresis - a single extra wheel notch or button click at the boundary
+  // (easy to do by accident) does not eject the user; any zoom-in clears it.
+  const zoomOutBeyondMinCountRef = useRef(0);
+
+  const registerZoomOutAttempt = useCallback((prevViewBox) => {
+    if (!onZoomOutBeyondMin) return;
+    const atMinZoom = prevViewBox.w >= bounds.maxW - 0.01;
+    if (!atMinZoom) return;
+    zoomOutBeyondMinCountRef.current += 1;
+    if (zoomOutBeyondMinCountRef.current >= 2) {
+      zoomOutBeyondMinCountRef.current = 0;
+      onZoomOutBeyondMin();
+    }
+  }, [bounds, onZoomOutBeyondMin]);
 
   const clientToWorld = useCallback((clientX, clientY, vb) => {
     const node = svgRef.current;
@@ -141,14 +168,16 @@ function usePanZoom(svgRef, config) {
   }, []);
 
   const zoomIn = useCallback(() => {
+    zoomOutBeyondMinCountRef.current = 0;
     const prev = viewBoxRef.current;
     animateTo(zoomAt(prev, ZOOM_STEP, prev.x + prev.w / 2, prev.y + prev.h / 2, bounds));
   }, [animateTo, bounds]);
 
   const zoomOut = useCallback(() => {
     const prev = viewBoxRef.current;
+    registerZoomOutAttempt(prev);
     animateTo(zoomAt(prev, 1 / ZOOM_STEP, prev.x + prev.w / 2, prev.y + prev.h / 2, bounds));
-  }, [animateTo, bounds]);
+  }, [animateTo, bounds, registerZoomOutAttempt]);
 
   const reset = useCallback(() => animateTo(initialViewBox), [animateTo, initialViewBox]);
 
@@ -166,6 +195,7 @@ function usePanZoom(svgRef, config) {
   // map. Attached imperatively (not via JSX onWheel) because React treats
   // onWheel as a passive listener by default.
   useEffect(() => {
+    if (!active) return undefined;
     const node = svgRef.current;
     if (!node) return undefined;
     const onWheel = (event) => {
@@ -175,13 +205,19 @@ function usePanZoom(svgRef, config) {
         animationFrameRef.current = null;
       }
       const prev = viewBoxRef.current;
-      const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+      const isZoomOut = event.deltaY >= 0;
+      if (isZoomOut) {
+        registerZoomOutAttempt(prev);
+      } else {
+        zoomOutBeyondMinCountRef.current = 0;
+      }
+      const factor = isZoomOut ? 1 / ZOOM_STEP : ZOOM_STEP;
       const { x: fx, y: fy } = clientToWorld(event.clientX, event.clientY, prev);
       applyViewBox(zoomAt(prev, factor, fx, fy, bounds));
     };
     node.addEventListener('wheel', onWheel, { passive: false });
     return () => node.removeEventListener('wheel', onWheel);
-  }, [svgRef, clientToWorld, applyViewBox, bounds]);
+  }, [svgRef, clientToWorld, applyViewBox, bounds, registerZoomOutAttempt, active]);
 
   const handlePointerDown = useCallback((event) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;

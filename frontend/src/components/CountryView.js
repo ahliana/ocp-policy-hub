@@ -79,6 +79,14 @@ function CountryView({
     };
   }, [load]);
 
+  // onBack wrapped behind a ref so its identity here never changes - keeps
+  // panZoomConfig's memoization keyed on `geometry` alone (see below).
+  const onBackRef = useRef(onBack);
+  useEffect(() => {
+    onBackRef.current = onBack;
+  }, [onBack]);
+  const handleZoomOutBeyondMin = useCallback(() => onBackRef.current(), []);
+
   // Only recomputed when the lazy-loaded geometry itself changes (once), so
   // this object's identity stays stable across re-renders - usePanZoom
   // resets its viewBox when this identity changes, and would otherwise snap
@@ -87,8 +95,18 @@ function CountryView({
     if (!geometry) return undefined;
     const [x, y, w, h] = geometry.viewBox;
     const viewBox = { x, y, w, h };
-    return { viewBox, bounds: { ...viewBox, minW: w / 8, maxW: w } };
-  }, [geometry]);
+    return {
+      viewBox,
+      bounds: { ...viewBox, minW: w / 8, maxW: w },
+      onZoomOutBeyondMin: handleZoomOutBeyondMin,
+      // The svg only mounts once children coverage has ALSO loaded (see
+      // isLoading below) - `active` must flip true in that same render or
+      // usePanZoom's wheel listener attaches against a null ref and never
+      // re-fires. Identity changes from this dep happen before any user
+      // interaction, so the viewBox reset they trigger is a no-op.
+      active: !childrenLoading,
+    };
+  }, [geometry, handleZoomOutBeyondMin, childrenLoading]);
   const panZoom = usePanZoom(svgRef, panZoomConfig);
 
   const joined = useMemo(
@@ -241,6 +259,14 @@ function CountryView({
         </button>
 
         <div className="wm-controls" role="group" aria-label="Map zoom controls">
+          <button
+            type="button"
+            className="wm-control-btn wm-control-reset"
+            aria-label="Back to world map"
+            onClick={onBack}
+          >
+            World
+          </button>
           <button
             type="button"
             className="wm-control-btn"

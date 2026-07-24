@@ -1,39 +1,37 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiUrl } from '../config/api';
-import { resolveDomainsForTargets, splitSelection } from '../utils/scanTargets';
+import { adminHeaders } from '../utils/adminAuth';
+import { normalizeTarget, splitSelection } from '../utils/scanTargets';
 
-async function getCostEstimate(domains) {
-    const response = await fetch(
-        apiUrl(`/api/cost-estimate?domains=${encodeURIComponent(domains)}`),
-        { method: 'POST' },
-    );
+// A real, documented bound (src/agent/orchestrator.py's PolicyAgent.run(),
+// max_iterations default): discovery has no dollar estimate, but it is not
+// unbounded either, so we say so instead of blacking the line out.
+const DISCOVERY_COST_NOTE =
+    "Discovery cost is bounded by the agent's 50-iteration search limit per "
+    + 'country scan; actual cost within that varies with how much it explores.';
 
-    if (!response.ok) {
-        throw new Error(`Cost estimate failed for ${domains} (${response.status})`);
+// One aggregated call per selection change - the backend's `domains` query
+// param already accepts a comma-separated union of groups/regions/ids, so a
+// 165-domain US selection is one request, not one request per domain.
+async function getCostEstimate(domains, deep) {
+    const params = new URLSearchParams({ domains });
+    if (deep) {
+        params.set('deep', 'true');
     }
-
-    return response.json();
+    return fetch(apiUrl(`/api/cost-estimate?${params.toString()}`), {
+        method: 'POST',
+        headers: adminHeaders(),
+    });
 }
 
-function sumCostEstimates(estimates) {
-    return estimates.reduce(
-        (total, estimate) => ({
-            domain_count: total.domain_count + (estimate.domain_count || 0),
-            estimated_pages: total.estimated_pages + (estimate.estimated_pages || 0),
-            estimated_keyword_passes: total.estimated_keyword_passes + (estimate.estimated_keyword_passes || 0),
-            estimated_screening_calls: total.estimated_screening_calls + (estimate.estimated_screening_calls || 0),
-            estimated_analysis_calls: total.estimated_analysis_calls + (estimate.estimated_analysis_calls || 0),
-            estimated_cost_usd: total.estimated_cost_usd + (estimate.estimated_cost_usd || 0),
-        }),
-        {
-            domain_count: 0,
-            estimated_pages: 0,
-            estimated_keyword_passes: 0,
-            estimated_screening_calls: 0,
-            estimated_analysis_calls: 0,
-            estimated_cost_usd: 0,
-        },
-    );
+function errorStatusForResponse(status) {
+    if (status === 401 || status === 403) {
+        return 'unauthorized';
+    }
+    if (status === 400) {
+        return 'bad_scope';
+    }
+    return 'error';
 }
 
 function formatCostEstimateText(costStatus, costEstimate) {
@@ -43,8 +41,14 @@ function formatCostEstimateText(costStatus, costEstimate) {
     if (costStatus === 'filters_only') {
         return 'Select a scan target';
     }
-    if (costStatus === 'standard_only') {
-        return 'Cost estimates are only available in standard mode.';
+    if (costStatus === 'discover') {
+        return DISCOVERY_COST_NOTE;
+    }
+    if (costStatus === 'unauthorized') {
+        return 'Sign in as admin to see estimates.';
+    }
+    if (costStatus === 'bad_scope') {
+        return 'Unknown scan scope.';
     }
     if (costStatus === 'error') {
         return 'Estimate unavailable';
@@ -58,7 +62,7 @@ function formatCostEstimateText(costStatus, costEstimate) {
     return 'No cost estimate';
 }
 
-function useCostEstimate({ selectedRegions, isStandardMode }) {
+function useCostEstimate({ selectedRegions, mode }) {
     const [costEstimate, setCostEstimate] = useState(null);
     const [costStatus, setCostStatus] = useState('idle');
 
@@ -66,9 +70,9 @@ function useCostEstimate({ selectedRegions, isStandardMode }) {
         let isCurrent = true;
         const { categories, tags, targets } = splitSelection(selectedRegions);
 
-        if (!isStandardMode) {
+        if (mode === 'discover') {
             setCostEstimate(null);
-            setCostStatus('standard_only');
+            setCostStatus('discover');
             return () => {
                 isCurrent = false;
             };
@@ -83,14 +87,21 @@ function useCostEstimate({ selectedRegions, isStandardMode }) {
         }
 
         setCostStatus('loading');
+        const domains = targets.map(normalizeTarget).join(',');
 
-        resolveDomainsForTargets(targets)
-            .then((domains) => Promise.all(domains.map((domain) => getCostEstimate(domain.id))))
-            .then((estimates) => {
+        getCostEstimate(domains, mode === 'deep')
+            .then(async (response) => {
+                if (!isCurrent) return;
+                if (!response.ok) {
+                    setCostEstimate(null);
+                    setCostStatus(errorStatusForResponse(response.status));
+                    return;
+                }
+                const data = await response.json();
                 if (!isCurrent) return;
                 setCostEstimate({
-                    ...sumCostEstimates(estimates),
-                    target_count: estimates.length,
+                    ...data,
+                    target_count: data.domain_count,
                     has_filters: categories.length > 0 || tags.length > 0,
                 });
                 setCostStatus('ready');
@@ -104,7 +115,7 @@ function useCostEstimate({ selectedRegions, isStandardMode }) {
         return () => {
             isCurrent = false;
         };
-    }, [selectedRegions, isStandardMode]);
+    }, [selectedRegions, mode]);
 
     const costEstimateText = useMemo(
         () => formatCostEstimateText(costStatus, costEstimate),

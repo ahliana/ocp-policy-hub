@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import CountryView from './CountryView';
 
 const GEOMETRY = {
@@ -249,6 +249,31 @@ describe('CountryView', () => {
     expect(onBack).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: /World/ }));
+    expect(onBack).toHaveBeenCalledTimes(2);
+  });
+
+  it('the zoom controls always show a "World" button that calls onBack', async () => {
+    const onBack = jest.fn();
+    global.fetch = mockFetchChildren();
+    render(
+      <CountryView
+        slug="belgium"
+        countryName="Belgium"
+        load={mockLoad()}
+        onBack={onBack}
+        onSelectPlace={jest.fn()}
+      />,
+    );
+
+    const controls = await screen.findByRole('group', { name: 'Map zoom controls' });
+    const worldButton = within(controls).getByRole('button', { name: 'Back to world map' });
+    expect(worldButton).toHaveTextContent('World');
+
+    fireEvent.click(worldButton);
+    expect(onBack).toHaveBeenCalledTimes(1);
+
+    // The breadcrumb "World" link is a distinct control and still works.
+    fireEvent.click(screen.getByRole('button', { name: '← World' }));
     expect(onBack).toHaveBeenCalledTimes(2);
   });
 
