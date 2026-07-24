@@ -97,3 +97,25 @@ describe('AgentPanel admin mode banner', () => {
     expect(screen.getByText(/Administrator mode/i)).toBeInTheDocument();
   });
 });
+
+describe('AgentPanel Library gating', () => {
+  it('does not render the Library before admin is opened', () => {
+    renderPanel();
+    expect(screen.queryByText(/Library - everything in the database/i)).not.toBeInTheDocument();
+  });
+
+  it('does not render the Library when admin is open but locked', async () => {
+    renderPanel({ adminRequired: true, hasAdminToken: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Admin' }));
+
+    await screen.findByText(/read-only view/i);
+    expect(screen.queryByText(/Library - everything in the database/i)).not.toBeInTheDocument();
+  });
+
+  it('renders the Library once admin is opened and unlocked', async () => {
+    renderPanel({ adminRequired: false, hasAdminToken: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Admin' }));
+
+    expect(await screen.findByText(/Library - everything in the database/i)).toBeInTheDocument();
+  });
+});

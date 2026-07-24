@@ -62,7 +62,7 @@ function PlanPreview({ plan }) {
                     <p className="search-plan-line">
                         <strong>Estimated cost:</strong>{' '}
                         up to ~${(estimate?.llm_ceiling_usd ?? 0).toFixed(2)} in AI analysis
-                        {' '}(cost level: {estimate?.cost_level})
+                        {' '}(model cost level: {estimate?.cost_level}, set in API key settings)
                         {legiscan && (
                             <>
                                 {' '}· uses at most {legiscan.max_queries} LegiScan queries
@@ -70,6 +70,10 @@ function PlanPreview({ plan }) {
                                 {legiscan.limit.toLocaleString()} left this month)
                             </>
                         )}
+                    </p>
+                    <p className="search-plan-line search-plan-advanced-hint">
+                        Want a different scan mode (discover, deep) or hand-picked regions
+                        and sources? Open &ldquo;Advanced&rdquo; below.
                     </p>
                 </>
             )}

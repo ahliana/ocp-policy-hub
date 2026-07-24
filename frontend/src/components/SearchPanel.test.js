@@ -120,6 +120,20 @@ describe('SearchPanel plan preview', () => {
         expect(screen.getByRole('button', { name: 'Search' })).toBeEnabled();
     });
 
+    it('disambiguates the model cost level and points at Advanced for scan modes', async () => {
+        global.fetch = mockFetch();
+        render(<SearchPanel hasApiKey isBusy={false} />);
+
+        await typePlace('California');
+
+        await waitFor(() => {
+            expect(screen.getByText(/model cost level: standard, set in API key settings/))
+                .toBeInTheDocument();
+        });
+        expect(screen.getByText(/Want a different scan mode \(discover, deep\)/))
+            .toBeInTheDocument();
+    });
+
     it('explains an unrecognized place and keeps Search disabled', async () => {
         global.fetch = mockFetch({ plan: UNKNOWN_PLAN });
         render(<SearchPanel hasApiKey isBusy={false} />);

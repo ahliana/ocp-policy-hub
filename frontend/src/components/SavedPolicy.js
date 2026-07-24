@@ -152,9 +152,9 @@ function SavedPolicy({ policy, tags = {} }) {
     const getReviewStatusBadge = (status) => {
         const statusMap = {
             new: 'badge-new',
-            needs_review: 'badge-review',
-            verified: 'badge-verified',
-            archived: 'badge-archived',
+            reviewed: 'badge-review',
+            promoted: 'badge-verified',
+            rejected: 'badge-archived',
         };
         return statusMap[status] || 'badge-default';
     };

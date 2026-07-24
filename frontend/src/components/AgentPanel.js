@@ -8,6 +8,7 @@ import AdminSignInDialog from './AdminSignInDialog';
 import AgentChatPanel from './AgentChatPanel';
 import ApiKeySettingsModal from './ApiKeySettingsModal';
 import DomainScanPanel from './DomainScanPanel';
+import LibraryView from './LibraryView';
 import PolicyScannerHeader from './PolicyScannerHeader';
 import PublicVisibilityControl from './PublicVisibilityControl';
 import ReviewInbox from './ReviewInbox';
@@ -198,6 +199,7 @@ function AgentPanel({
                         isRunning={isChatRunning}
                     />
                     <ReviewInbox isAdmin={adminUnlocked} />
+                    <LibraryView />
                 </div>
             ) : (
                 <p className="admin-readonly-note" role="status">

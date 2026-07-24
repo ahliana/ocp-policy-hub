@@ -158,50 +158,58 @@ class PolicyStore:
         rows = self._conn.execute(query, params).fetchall()
         return [json.loads(row[0]) for row in rows]
 
-    def update_review_status(self, url: str, review_status: str) -> bool:
-        """Set a policy's review status by URL. Returns False if not found."""
-        cur = self._conn.execute(
-            "UPDATE policies SET review_status = ?, "
-            "raw = json_set(raw, '$.review_status', ?) WHERE url = ?",
-            (review_status, review_status, url),
-        )
+    def update_review_status(
+        self, url: str, review_status: str, note: Optional[str] = None
+    ) -> bool:
+        """Set a policy's review status by URL. Returns False if not found.
+
+        ``note`` is the optional reject reason (WP-4 Library): it lives only
+        in the raw JSON as ``review_note``, no typed column. It is stored
+        when rejecting with a reason; any other status — including a bare
+        "rejected" with no reason — clears it, so a stale reason never
+        survives a status change it doesn't belong to.
+        """
+        if review_status == "rejected" and note:
+            cur = self._conn.execute(
+                "UPDATE policies SET review_status = ?, "
+                "raw = json_set(json_set(raw, '$.review_status', ?), "
+                "'$.review_note', ?) WHERE url = ?",
+                (review_status, review_status, note, url),
+            )
+        else:
+            cur = self._conn.execute(
+                "UPDATE policies SET review_status = ?, "
+                "raw = json_remove(json_set(raw, '$.review_status', ?), "
+                "'$.review_note') WHERE url = ?",
+                (review_status, review_status, url),
+            )
         # Commit unconditionally — the UPDATE opened a transaction whether
         # or not it matched a row, and an unmatched url must not leave it
         # open on this connection.
         self._conn.commit()
         return cur.rowcount > 0
 
-    def search(
-        self,
-        jurisdiction: Optional[str] = None,
-        policy_type: Optional[str] = None,
-        min_score: Optional[int] = None,
-        scan_id: Optional[str] = None,
-        review_status: Optional[str] = None,
-        lifecycle_stage: Optional[str] = None,
-        exclude_review_status: Optional[str] = None,
-        review_status_in: Optional[list[str]] = None,
-    ) -> list[dict]:
-        """Search policies with filters.
-
-        The jurisdiction filter is a case-insensitive substring match — the
-        exact semantics of the JSON-backed store this replaced. FTS5 token
-        matching answers mid-word fragments differently, so the FTS index is
-        deliberately NOT used here; it exists for the upcoming free-text
-        search feature, where new semantics belong.
-
-        ``exclude_review_status``/``review_status_in`` are the public review
-        visibility clamp (src/api/review_visibility.py) — additive filters
-        that combine with ``review_status`` rather than replace it.
+    @staticmethod
+    def _search_conditions(
+        jurisdiction: Optional[str],
+        policy_type: Optional[str],
+        min_score: Optional[int],
+        scan_id: Optional[str],
+        review_status: Optional[str],
+        lifecycle_stage: Optional[str],
+        exclude_review_status: Optional[str],
+        review_status_in: Optional[list[str]],
+    ) -> tuple[list[str], list]:
+        """WHERE-clause fragments shared by ``search()`` and ``count()``, so
+        the total-matching-rows count can never drift from what a page of
+        results was actually filtered by.
         """
         conditions: list[str] = []
         params: list = []
 
-        query = "SELECT raw, rowid FROM policies"
         if jurisdiction:
             conditions.append("LOWER(jurisdiction) LIKE ? ESCAPE '\\'")
             params.append(f"%{storage_db.escape_like(jurisdiction.lower())}%")
-
         if review_status:
             conditions.append("review_status = ?")
             params.append(review_status)
@@ -223,13 +231,108 @@ class PolicyStore:
         )
         conditions.extend(visibility_conditions)
         params.extend(visibility_params)
+        return conditions, params
 
+    # sort name -> (SQL sort expression, default direction). "discovered_at"
+    # isn't a typed column (see src/storage/db.py schema) so it sorts via
+    # json_extract on the raw column instead — the bundled SQLite has JSON1
+    # built in (confirmed at dev time; sqlite3.sqlite_version >= 3.38), so no
+    # LIKE-style fallback is needed the way FTS5 needs one.
+    _SORT_COLUMNS = {
+        "name": ("policy_name", "asc"),
+        "jurisdiction": ("jurisdiction", "asc"),
+        "relevance": ("relevance_score", "desc"),
+        "discovered_at": ("json_extract(raw, '$.discovered_at')", "desc"),
+    }
+
+    def search(
+        self,
+        jurisdiction: Optional[str] = None,
+        policy_type: Optional[str] = None,
+        min_score: Optional[int] = None,
+        scan_id: Optional[str] = None,
+        review_status: Optional[str] = None,
+        lifecycle_stage: Optional[str] = None,
+        exclude_review_status: Optional[str] = None,
+        review_status_in: Optional[list[str]] = None,
+        sort: Optional[str] = None,
+        sort_dir: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> list[dict]:
+        """Search policies with filters.
+
+        The jurisdiction filter is a case-insensitive substring match — the
+        exact semantics of the JSON-backed store this replaced. FTS5 token
+        matching answers mid-word fragments differently, so the FTS index is
+        deliberately NOT used here; it exists for the upcoming free-text
+        search feature, where new semantics belong.
+
+        ``exclude_review_status``/``review_status_in`` are the public review
+        visibility clamp (src/api/review_visibility.py) — additive filters
+        that combine with ``review_status`` rather than replace it.
+
+        ``sort`` is one of ``"discovered_at"``, ``"name"``, ``"jurisdiction"``,
+        ``"relevance"`` (default ``rowid`` insertion order, ascending, when
+        omitted). ``sort_dir`` is ``"asc"``/``"desc"``; each sort key has a
+        sensible default direction when ``sort_dir`` is omitted. ``rowid`` is
+        always the tie-breaker so equal sort keys still paginate stably.
+        ``limit``/``offset`` apply in SQL (``LIMIT``/``OFFSET``), not by
+        slicing the full Python list.
+        """
+        conditions, params = self._search_conditions(
+            jurisdiction, policy_type, min_score, scan_id, review_status,
+            lifecycle_stage, exclude_review_status, review_status_in,
+        )
+
+        query = "SELECT raw, rowid FROM policies"
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
-        query += " ORDER BY rowid"
+
+        if sort in self._SORT_COLUMNS:
+            column, default_dir = self._SORT_COLUMNS[sort]
+            direction = "DESC" if (sort_dir or default_dir).lower() == "desc" else "ASC"
+            query += f" ORDER BY {column} {direction}, rowid ASC"
+        else:
+            query += " ORDER BY rowid"
+
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+            if offset is not None:
+                query += " OFFSET ?"
+                params.append(offset)
+        elif offset is not None:
+            # SQLite requires a LIMIT for OFFSET; -1 means "no limit".
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
 
         rows = self._conn.execute(query, params).fetchall()
         return [json.loads(row[0]) for row in rows]
+
+    def count(
+        self,
+        jurisdiction: Optional[str] = None,
+        policy_type: Optional[str] = None,
+        min_score: Optional[int] = None,
+        scan_id: Optional[str] = None,
+        review_status: Optional[str] = None,
+        lifecycle_stage: Optional[str] = None,
+        exclude_review_status: Optional[str] = None,
+        review_status_in: Optional[list[str]] = None,
+    ) -> int:
+        """Total rows matching the same filters ``search()`` accepts (minus
+        sort/limit/offset) — the ``total`` a paginated caller needs alongside
+        one page of results.
+        """
+        conditions, params = self._search_conditions(
+            jurisdiction, policy_type, min_score, scan_id, review_status,
+            lifecycle_stage, exclude_review_status, review_status_in,
+        )
+        query = "SELECT COUNT(*) FROM policies"
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        return self._conn.execute(query, params).fetchone()[0]
 
     def search_text(
         self,
