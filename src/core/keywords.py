@@ -14,6 +14,15 @@ from urllib.parse import urlparse
 
 from .models import KeywordResult, KeywordMatch
 
+# The 7 categories x 20 languages keywords.yaml ships with today. Used to
+# validate PUT /api/keywords/overrides payloads (src/api/routes/keywords_admin.py)
+# so an admin can't add terms under a language KeywordMatcher's compound-word
+# handling doesn't know about.
+VALID_KEYWORD_LANGUAGES: frozenset[str] = frozenset({
+    "ar", "cs", "da", "de", "el", "en", "es", "fi", "fr", "hu",
+    "is", "it", "ja", "ko", "nl", "no", "pl", "pt", "ro", "sv",
+})
+
 # Languages that use compound words (skip word boundaries)
 COMPOUND_LANGUAGES: set[str] = {"de", "nl", "sv", "da", "no", "fi", "is", "hu", "ja", "ko", "ar"}
 
@@ -206,3 +215,25 @@ class KeywordMatcher:
             effective_score += self.url_bonus(url)
         threshold_60 = min_score * 0.6
         return effective_score >= threshold_60 and not result.passes_threshold
+
+
+def build_keyword_matcher(config, data_dir: str) -> "KeywordMatcher":
+    """The single seam every KeywordMatcher construction site should use.
+
+    Merges the kv-backed keyword overlay (src/storage/keyword_overrides.py)
+    onto ``config.keywords_config`` (see
+    src/core/overrides.py:apply_keyword_overrides) before constructing the
+    matcher, so an admin's added/removed terms and threshold overrides reach
+    every consumer — scanner, /api/analyze, agent tools, mcp server — with
+    no restart. Call sites already have a ``data_dir`` (ScanManager,
+    PolicyStore, etc. all take one), so this takes that rather than a
+    pre-built store, matching the "construct a store per call" pattern
+    already used for PolicyStore/CostSettingsStore elsewhere in this
+    codebase — cheap, since it's a local SQLite connection.
+    """
+    from ..storage.keyword_overrides import KeywordOverridesStore
+    from .overrides import apply_keyword_overrides
+
+    store = KeywordOverridesStore(data_dir=data_dir)
+    merged = apply_keyword_overrides(config.keywords_config, store.get())
+    return KeywordMatcher(merged)

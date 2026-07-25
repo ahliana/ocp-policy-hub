@@ -39,11 +39,16 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from ..deps import get_config, get_policy_store, get_public_visibility_store, get_scan_manager
+from ..deps import (
+    get_config, get_domain_overrides_store, get_policy_store,
+    get_public_visibility_store, get_scan_manager,
+)
 from ..review_visibility import passes_visibility, visibility_filter_kwargs
 from ...core import jurisdictions
 from ...core.config import ConfigLoader
+from ...core.overrides import apply_domain_overrides
 from ...orchestration.scan_manager import ScanManager
+from ...storage.domain_overrides import DomainOverridesStore
 from ...storage.store import PolicyStore
 
 router = APIRouter(prefix="/api", tags=["coverage"])
@@ -273,6 +278,15 @@ def compute_children(
     }
 
 
+def _enabled_domains(config: ConfigLoader, overrides_store: DomainOverridesStore) -> list[dict]:
+    """All enabled domains, WP-8 overlay applied — an overlay-disabled
+    domain must not count as a source on the map, same seam as
+    ScanManager.start_scan/estimate_cost and GET /api/domains?group=."""
+    return apply_domain_overrides(
+        config.get_enabled_domains("all"), overrides_store.get_all(),
+    )
+
+
 def _all_policies(store: PolicyStore, manager: ScanManager, **filter_kwargs) -> list[dict]:
     """Persisted policies plus in-memory scan results, deduped by URL.
 
@@ -309,6 +323,7 @@ def get_coverage(
     manager: ScanManager = Depends(get_scan_manager),
     config: ConfigLoader = Depends(get_config),
     visibility_store=Depends(get_public_visibility_store),
+    overrides_store: DomainOverridesStore = Depends(get_domain_overrides_store),
 ):
     """Coverage aggregate for the world map: countries, supranational, totals.
 
@@ -317,7 +332,7 @@ def get_coverage(
     """
     filter_kwargs = visibility_filter_kwargs(request, review, visibility_store.get().mode)
     result = compute_coverage(
-        _all_policies(store, manager, **filter_kwargs), config.get_enabled_domains("all")
+        _all_policies(store, manager, **filter_kwargs), _enabled_domains(config, overrides_store)
     )
     return {k: result[k] for k in ("countries", "supranational", "totals")}
 
@@ -333,6 +348,7 @@ def get_coverage_children(
     manager: ScanManager = Depends(get_scan_manager),
     config: ConfigLoader = Depends(get_config),
     visibility_store=Depends(get_public_visibility_store),
+    overrides_store: DomainOverridesStore = Depends(get_domain_overrides_store),
 ):
     """One country broken out by state/province: national vs. each child.
 
@@ -340,7 +356,7 @@ def get_coverage_children(
     """
     filter_kwargs = visibility_filter_kwargs(request, review, visibility_store.get().mode)
     result = compute_children(
-        parent, _all_policies(store, manager, **filter_kwargs), config.get_enabled_domains("all")
+        parent, _all_policies(store, manager, **filter_kwargs), _enabled_domains(config, overrides_store)
     )
     if result is None:
         raise HTTPException(status_code=404, detail=f"Unknown country '{parent}'")
@@ -352,6 +368,7 @@ def get_coverage_unresolved(
     store: PolicyStore = Depends(get_policy_store),
     manager: ScanManager = Depends(get_scan_manager),
     config: ConfigLoader = Depends(get_config),
+    overrides_store: DomainOverridesStore = Depends(get_domain_overrides_store),
 ):
     """Jurisdiction strings and region slugs the registry could not resolve.
 
@@ -361,6 +378,6 @@ def get_coverage_unresolved(
     keeps the slug list empty in CI.
     """
     result = compute_coverage(
-        _all_policies(store, manager), config.get_enabled_domains("all")
+        _all_policies(store, manager), _enabled_domains(config, overrides_store)
     )
     return result["diagnostics"]

@@ -4,7 +4,9 @@ import hmac
 import os
 from functools import lru_cache
 
-from ..core.config import ConfigLoader
+import yaml
+
+from ..core.config import ConfigLoader, ConfigurationError
 from ..orchestration.events import EventBroadcaster
 from ..orchestration.scan_manager import ScanManager
 from ..storage.store import PolicyStore
@@ -40,12 +42,66 @@ def request_is_admin(request) -> bool:
     return host in LOOPBACK_HOSTS or host == TESTCLIENT_HOST
 
 
-@lru_cache()
-def get_config() -> ConfigLoader:
+# get_config()/get_scan_manager() used to be plain @lru_cache singletons.
+# WP-8 needs to rebuild the config from disk at runtime (POST
+# /api/config/reload) and swap it in atomically, so both are now a
+# module-level holder dict instead — same "build once, reuse" behavior, but
+# swappable. ScanManager.config is a plain attribute (no property needed): a
+# successful reload also reassigns it on the already-built ScanManager
+# singleton, since ScanManager captured the pre-reload ConfigLoader instance
+# at construction and would otherwise keep serving stale config forever.
+_config_state: dict = {"instance": None, "version": 0}
+_scan_manager_state: dict = {"instance": None}
+
+
+def _build_config() -> ConfigLoader:
     config_dir = os.environ.get("OCP_CONFIG_DIR", "config")
     config = ConfigLoader(config_dir=config_dir)
-    config.load()
+    try:
+        config.load()
+    except yaml.YAMLError as e:
+        # ConfigLoader wraps some load errors (e.g. a broken domains/*.yaml
+        # file) in ConfigurationError already, but a malformed settings.yaml
+        # or keywords.yaml raises a bare YAMLError — normalize both to
+        # ConfigurationError here so reload_config()'s caller (the
+        # /api/config/reload route) has exactly one exception type to catch.
+        raise ConfigurationError(f"Invalid YAML in config: {e}") from e
     return config
+
+
+def get_config() -> ConfigLoader:
+    if _config_state["instance"] is None:
+        _config_state["instance"] = _build_config()
+        _config_state["version"] += 1
+    return _config_state["instance"]
+
+
+def get_config_version() -> int:
+    """Monotonically increasing counter, bumped on every successful build or
+    reload — lets GET /health show staleness."""
+    return _config_state["version"]
+
+
+def reload_config() -> ConfigLoader:
+    """Rebuild ``ConfigLoader`` from YAML on disk and swap it in.
+
+    Raises ``ConfigurationError`` (propagated, uncaught) on a YAML error —
+    the previous config is left untouched and keeps serving; the version
+    counter is not bumped. On success, the new instance becomes what
+    ``get_config()`` returns, the version bumps by one, and the already-built
+    ``ScanManager`` singleton (if any) has its ``config`` attribute pointed
+    at the new instance so a scan started right after a reload sees fresh
+    YAML with no process restart.
+    """
+    new_config = _build_config()
+    _config_state["instance"] = new_config
+    _config_state["version"] += 1
+
+    manager = _scan_manager_state["instance"]
+    if manager is not None:
+        manager.config = new_config
+
+    return new_config
 
 
 @lru_cache()
@@ -88,14 +144,30 @@ def get_scan_history_store():
 
 
 @lru_cache()
-def get_scan_manager() -> ScanManager:
-    config = get_config()
-    broadcaster = get_broadcaster()
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+def get_domain_overrides_store():
+    from ..storage.domain_overrides import DomainOverridesStore
     data_dir = os.environ.get("OCP_DATA_DIR", "data")
-    return ScanManager(
-        config=config,
-        broadcaster=broadcaster,
-        api_key=api_key,
-        data_dir=data_dir,
-    )
+    return DomainOverridesStore(data_dir=data_dir)
+
+
+@lru_cache()
+def get_keyword_overrides_store():
+    from ..storage.keyword_overrides import KeywordOverridesStore
+    data_dir = os.environ.get("OCP_DATA_DIR", "data")
+    return KeywordOverridesStore(data_dir=data_dir)
+
+
+def get_scan_manager() -> ScanManager:
+    if _scan_manager_state["instance"] is None:
+        config = get_config()
+        broadcaster = get_broadcaster()
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        data_dir = os.environ.get("OCP_DATA_DIR", "data")
+        _scan_manager_state["instance"] = ScanManager(
+            config=config,
+            broadcaster=broadcaster,
+            api_key=api_key,
+            data_dir=data_dir,
+            domain_overrides_store=get_domain_overrides_store(),
+        )
+    return _scan_manager_state["instance"]

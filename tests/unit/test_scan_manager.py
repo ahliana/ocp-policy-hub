@@ -453,6 +453,51 @@ class TestScanHistoryWiring:
         assert row["completed_at"] is not None
 
     @pytest.mark.asyncio
+    async def test_crawl_filters_snapshotted_once_per_scan(self, tmp_path, monkeypatch):
+        """POST /api/config/reload reassigns manager.config on the live
+        instance. The url-filter set must be read once at scan start, not per
+        domain, or one run would crawl early domains under the old filters
+        and later domains under the new ones (review finding on WP-8)."""
+        config = _minimal_config(tmp_path / "config")
+        base_domain = dict(config.get_enabled_domains("quick")[0])
+        second = dict(base_domain, id="test_gov_2", name="Test Gov 2")
+        monkeypatch.setattr(
+            config, "get_enabled_domains", lambda group: [dict(base_domain), second],
+        )
+        skip_mock = MagicMock(side_effect=[[".one"], [".two"]])
+        monkeypatch.setattr(config, "get_skip_extensions", skip_mock)
+
+        manager = ScanManager(
+            config=config, broadcaster=EventBroadcaster(), data_dir=str(tmp_path / "data"),
+        )
+        mock_scanner = MagicMock()
+        mock_scanner.scan = AsyncMock(return_value=[])
+        mock_scanner.progress = DomainProgress(
+            domain_id="test_gov", domain_name="Test Gov",
+            status=DomainScanStatus.COMPLETED,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.DomainScanner",
+            lambda **kwargs: mock_scanner,
+        )
+        crawler_kwargs = []
+
+        def record_crawler(**kwargs):
+            crawler_kwargs.append(kwargs)
+            return MagicMock(close=AsyncMock())
+
+        monkeypatch.setattr("src.orchestration.scan_manager.AsyncCrawler", record_crawler)
+
+        job = await manager.start_scan(
+            domains_group="quick", skip_llm=True, max_concurrent=1,
+        )
+        await manager._tasks[job.scan_id]
+
+        assert len(crawler_kwargs) == 2
+        assert [k["skip_extensions"] for k in crawler_kwargs] == [[".one"], [".one"]]
+        assert skip_mock.call_count == 1
+
+    @pytest.mark.asyncio
     async def test_deep_scan_records_deep_mode(self, tmp_path, monkeypatch):
         manager, data_dir = self._manager(tmp_path, monkeypatch, domain_scan_result=[])
 

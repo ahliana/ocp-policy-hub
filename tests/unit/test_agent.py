@@ -84,6 +84,21 @@ class TestToolDispatch:
             assert "eu" in d["region"]
 
     @pytest.mark.asyncio
+    async def test_list_domains_respects_domain_overrides(self, config, tmp_path):
+        # A domain disabled via the admin Sources panel must not show as
+        # available through agent chat either (review finding on WP-9).
+        from src.storage.domain_overrides import DomainOverridesStore
+        manager = ScanManager(
+            config=config, broadcaster=EventBroadcaster(), data_dir=str(tmp_path),
+        )
+        victim = config.get_enabled_domains("all")[0]["id"]
+        DomainOverridesStore(data_dir=str(tmp_path)).set_enabled(victim, False)
+
+        result = await execute_tool("list_domains", {"group": "all"}, config, manager)
+
+        assert victim not in [d["id"] for d in result["domains"]]
+
+    @pytest.mark.asyncio
     async def test_estimate_cost(self, config, scan_manager):
         result = await execute_tool("estimate_cost", {"domains": "quick"}, config, scan_manager)
         assert "domain_count" in result

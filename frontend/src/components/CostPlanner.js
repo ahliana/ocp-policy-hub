@@ -35,6 +35,20 @@ async function fetchProjection(groups, cadence) {
     return response.json();
 }
 
+// Scopes with no completed scan history are priced by the pre-scan formula
+// alone, which tends to run high - say so wherever the numbers appear, so a
+// large figure is never mistaken for a grounded one.
+export const NO_HISTORY_NOTE =
+    'Scopes marked * have no completed scans recorded yet - their figures come '
+    + 'from the pre-scan formula, which tends to run high. After a scope has run '
+    + 'twice, real recorded costs replace the formula automatically.';
+
+export function scenariosLackHistory(scenarios) {
+    return scenarios.some(({ projection }) => (
+        projection && projection.items.some((item) => !item.history)
+    ));
+}
+
 // Plain-text, fixed-width columns - this feeds a funding email, so it has to
 // render cleanly without markdown table pipes.
 export function buildPlainTextTable(scenarios, cadence) {
@@ -46,7 +60,7 @@ export function buildPlainTextTable(scenarios, cadence) {
         projection.items.forEach((item) => {
             rows.push([
                 name,
-                item.group,
+                item.history ? item.group : `${item.group} *`,
                 formatUsd(item.estimate_usd),
                 item.history ? formatUsd(item.history.mean_cost_usd) : '-',
                 formatUsd(item.per_month_usd),
@@ -63,7 +77,11 @@ export function buildPlainTextTable(scenarios, cadence) {
         cells.map((cell, col) => String(cell).padEnd(widths[col])).join('  ').trimEnd()
     );
 
-    return [formatRow(headers), ...rows.map(formatRow)].join('\n');
+    const lines = [formatRow(headers), ...rows.map(formatRow)];
+    if (scenariosLackHistory(scenarios)) {
+        lines.push('', NO_HISTORY_NOTE);
+    }
+    return lines.join('\n');
 }
 
 // Cost planner (WP-7) - projects estimate_cost()/scan-history actuals into a
@@ -239,7 +257,12 @@ function CostPlanner() {
                         const itemRows = projection.items.map((item) => (
                             <tr key={`${name}-${item.group}`}>
                                 {compareEnabled && <td>{name}</td>}
-                                <td>{item.group}</td>
+                                <td>
+                                    {item.group}
+                                    {!item.history && (
+                                        <span title="No completed scans recorded for this scope yet"> *</span>
+                                    )}
+                                </td>
                                 <td>{formatUsd(item.estimate_usd)}</td>
                                 <td>{item.history ? formatUsd(item.history.mean_cost_usd) : '-'}</td>
                                 <td>{formatUsd(item.per_month_usd)}</td>
@@ -258,6 +281,10 @@ function CostPlanner() {
                     })}
                 </tbody>
             </table>
+
+            {scenariosLackHistory(scenarios) && (
+                <p className="cost-planner-note" role="note">{NO_HISTORY_NOTE}</p>
+            )}
 
             <button type="button" className="button" onClick={handleCopy}>
                 Copy as text

@@ -20,7 +20,7 @@ from mcp.types import TextContent, Tool
 from ..core.config import ConfigLoader, ConfigurationError
 from ..core.crawler import AsyncCrawler
 from ..core.extractor import HtmlExtractor
-from ..core.keywords import KeywordMatcher
+from ..core.keywords import build_keyword_matcher
 from ..core.llm import ClaudeClient, LLMError
 from ..core.verifier import Verifier
 from ..orchestration.events import EventBroadcaster
@@ -211,6 +211,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if name == "list_domains":
             group = arguments.get("group", "all")
             domains = config.get_enabled_domains(group)
+            # Same overlay the API routes and ScanManager apply - without it,
+            # a domain disabled in the admin Sources panel still shows as
+            # available to MCP clients.
+            from ..core.overrides import apply_domain_overrides
+            from ..storage.domain_overrides import DomainOverridesStore
+            domains = apply_domain_overrides(
+                domains,
+                DomainOverridesStore(data_dir=manager.data_dir).get_all(),
+            )
             category = arguments.get("category")
             tags = arguments.get("tags")
             region = arguments.get("region")
@@ -303,7 +312,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             extractor = HtmlExtractor(settings.config_dir)
             extracted = extractor.extract(results[0].content, url)
 
-            kw_matcher = KeywordMatcher(config.keywords_config)
+            kw_matcher = build_keyword_matcher(config, manager.data_dir)
             kw_result = kw_matcher.match(extracted.text)
 
             response = {
@@ -344,7 +353,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return _json_result(response)
 
         elif name == "match_keywords":
-            kw_matcher = KeywordMatcher(config.keywords_config)
+            kw_matcher = build_keyword_matcher(config, manager.data_dir)
             result = kw_matcher.match(arguments["text"])
             return _json_result({
                 "score": result.score,

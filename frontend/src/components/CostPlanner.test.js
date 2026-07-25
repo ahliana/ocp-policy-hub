@@ -143,6 +143,27 @@ describe('CostPlanner table rows', () => {
     const row = screen.getByText('eu').closest('tr');
     expect(within(row).getByText('-')).toBeInTheDocument();
   });
+
+  it('marks no-history scopes and shows the formula caveat note', async () => {
+    global.fetch = mockFetch({ projectionByGroups: { eu: PROJECTION_B } });
+    render(<CostPlanner />);
+    await waitFor(() => expect(screen.getByText(/European Union/)).toBeInTheDocument());
+    await selectScopeA('eu');
+
+    await waitFor(() => expect(screen.getByText('eu')).toBeInTheDocument());
+    expect(screen.getByRole('note')).toHaveTextContent(/no completed scans recorded yet/);
+    expect(screen.getByText('eu').closest('td')).toHaveTextContent('*');
+  });
+
+  it('shows no caveat note when every scope has history', async () => {
+    global.fetch = mockFetch({ projectionByGroups: { quick: PROJECTION_A } });
+    render(<CostPlanner />);
+    await waitFor(() => expect(screen.getByText(/Quick scan/)).toBeInTheDocument());
+    await selectScopeA('quick');
+
+    await waitFor(() => expect(screen.getByText('quick')).toBeInTheDocument());
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
 });
 
 describe('CostPlanner compare scenario', () => {
@@ -202,6 +223,24 @@ describe('buildPlainTextTable (Copy as text)', () => {
       'monthly',
     );
     expect(text.split('\n')).toHaveLength(1); // header only
+  });
+
+  it('appends the no-history caveat and stars unhistoried groups in the text', () => {
+    const text = buildPlainTextTable(
+      [{ name: 'Scenario A', projection: PROJECTION_B }],
+      'monthly',
+    );
+    expect(text).toContain('eu *');
+    expect(text).toContain('no completed scans recorded yet');
+  });
+
+  it('omits the caveat when every group has history', () => {
+    const text = buildPlainTextTable(
+      [{ name: 'Scenario A', projection: PROJECTION_A }],
+      'monthly',
+    );
+    expect(text).not.toContain('no completed scans recorded yet');
+    expect(text).not.toContain('*');
   });
 
   it('writes the built text to navigator.clipboard on Copy as text', async () => {

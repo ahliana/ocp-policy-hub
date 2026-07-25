@@ -4,8 +4,10 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from ..deps import get_config
+from ..deps import get_config, get_domain_overrides_store
 from ...core.config import ConfigLoader, ConfigurationError
+from ...core.overrides import apply_domain_overrides
+from ...storage.domain_overrides import DomainOverridesStore
 
 router = APIRouter(prefix="/api", tags=["domains"])
 
@@ -16,11 +18,22 @@ def list_domains(
     category: Optional[str] = Query(None),
     tag: Optional[str] = Query(None),
     config: ConfigLoader = Depends(get_config),
+    overrides_store: DomainOverridesStore = Depends(get_domain_overrides_store),
 ):
-    """List domains, optionally filtered by group, category, or tag."""
+    """List domains, optionally filtered by group, category, or tag.
+
+    A ``group``-scoped listing (a scan-target picker) applies the WP-8
+    enabled overlay, same as ScanManager, so an overlay-disabled domain
+    doesn't appear as pickable. The unscoped listing (``config.list_domains()``,
+    the admin's full inventory view) intentionally shows every domain
+    regardless of overlay — see GET /api/sources/status (WP-9) for the
+    overlay-aware admin inventory.
+    """
     try:
         if group:
-            domains = config.get_enabled_domains(group)
+            domains = apply_domain_overrides(
+                config.get_enabled_domains(group), overrides_store.get_all(),
+            )
         else:
             domains = config.list_domains()
     except ConfigurationError as e:
