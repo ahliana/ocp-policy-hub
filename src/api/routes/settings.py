@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from ..deps import (
     get_config, get_cost_settings_store, get_public_visibility_store, get_scan_manager,
+    request_is_admin,
 )
 from ...storage.cost_settings import CostSettings
 from ...storage.public_visibility import PostureMode, PublicVisibilitySettings
@@ -89,7 +90,11 @@ def delete_env_key() -> bool:
 
 
 @router.get("/api-key")
-def get_api_key_status():
+def get_api_key_status(request: Request):
+    # Admin-only: even the masked key + "a key is configured" fact should not
+    # leak to anonymous callers (matches the /settings/sheet read gate).
+    if not request_is_admin(request):
+        raise HTTPException(status_code=403, detail="Administrator access required")
     value = os.environ.get(KEY_NAME)
 
     if not value and ENV_PATH.exists():

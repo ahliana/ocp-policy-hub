@@ -244,6 +244,71 @@ class TestAnalysisRoutes:
             ), f"advertised endpoint '{name}' ({base}) is not registered"
 
 
+class TestConfigSettingsSecurity:
+    """Regression: /api/config/settings must never leak the Google
+    service-account credentials, and the diagnostic GETs must be admin-only.
+    """
+
+    def _remote_client(self, mock_config, mock_store, mock_manager, mock_broadcaster):
+        from src.api.app import app
+        from src.api import deps
+        app.dependency_overrides[deps.get_config] = lambda: mock_config
+        app.dependency_overrides[deps.get_policy_store] = lambda: mock_store
+        app.dependency_overrides[deps.get_scan_manager] = lambda: mock_manager
+        app.dependency_overrides[deps.get_broadcaster] = lambda: mock_broadcaster
+        return TestClient(app, client=("203.0.113.7", 40000))
+
+    def _settings_with_secret(self, mock_config):
+        settings = MagicMock()
+        settings.model_dump.return_value = {
+            "crawl": {"max_pages_per_domain": 200},
+            "output": {
+                "spreadsheet_id": "sheet-abc",
+                "google_credentials_b64": "SUPER_SECRET_BASE64_BLOB",
+                "staging_sheet_name": "Staging",
+            },
+        }
+        mock_config.settings = settings
+
+    def test_admin_gets_settings_without_the_credentials_blob(self, client, mock_config):
+        self._settings_with_secret(mock_config)
+        resp = client.get("/api/config/settings")  # testclient host == admin
+        assert resp.status_code == 200
+        output = resp.json()["output"]
+        assert "google_credentials_b64" not in output
+        assert output["spreadsheet_id"] == "sheet-abc"  # non-secret field kept
+
+    def test_non_admin_cannot_read_settings(
+        self, mock_config, mock_store, mock_manager, mock_broadcaster
+    ):
+        from src.api.app import app
+        self._settings_with_secret(mock_config)
+        client = self._remote_client(mock_config, mock_store, mock_manager, mock_broadcaster)
+        try:
+            resp = client.get("/api/config/settings")
+            assert resp.status_code == 403
+            assert "SUPER_SECRET" not in resp.text
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_non_admin_cannot_read_keywords_or_logs_or_api_key(
+        self, mock_config, mock_store, mock_manager, mock_broadcaster
+    ):
+        from src.api.app import app
+        client = self._remote_client(mock_config, mock_store, mock_manager, mock_broadcaster)
+        try:
+            for path in (
+                "/api/config/keywords",
+                "/api/logs",
+                "/api/logs/audit",
+                "/api/logs/info",
+                "/api/settings/api-key",
+            ):
+                assert client.get(path).status_code == 403, path
+        finally:
+            app.dependency_overrides.clear()
+
+
 # --- Scans ---
 
 class TestScanRoutes:

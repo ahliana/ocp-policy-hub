@@ -13,8 +13,9 @@ Endpoints:
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
+from ..deps import request_is_admin
 from ...core.log_setup import (
     SESSION_ID,
     get_log_file_paths,
@@ -25,8 +26,17 @@ from ...core.log_setup import (
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 
 
+def _require_admin(request: Request) -> None:
+    # Logs carry internal diagnostics (session ids, domain config, file
+    # paths) that must not reach anonymous callers - same admin gate the
+    # other diagnostic GETs use.
+    if not request_is_admin(request):
+        raise HTTPException(status_code=403, detail="Administrator access required")
+
+
 @router.get("")
 def get_logs(
+    request: Request,
     lines: int = Query(50, ge=1, le=500, description="Number of entries to return"),
     level: Optional[str] = Query(
         None, description="Minimum level: debug, info, warning, error"
@@ -34,6 +44,7 @@ def get_logs(
     scan_id: Optional[str] = Query(None, description="Filter by scan ID"),
     session_id: Optional[str] = Query(None, description="Filter by session ID"),
 ):
+    _require_admin(request)
     """Return recent structured log entries, newest first.
 
     Reads from ``data/logs/agent.log`` (JSON-lines format).  Each entry
@@ -56,6 +67,7 @@ def get_logs(
 
 @router.get("/audit")
 def get_audit_logs(
+    request: Request,
     lines: int = Query(50, ge=1, le=500, description="Number of entries to return"),
     event_type: Optional[str] = Query(
         None,
@@ -63,6 +75,7 @@ def get_audit_logs(
     ),
     scan_id: Optional[str] = Query(None, description="Filter by scan ID"),
 ):
+    _require_admin(request)
     """Return recent audit trail events, newest first.
 
     The audit log (``data/logs/audit.jsonl``) records critical events:
@@ -82,13 +95,14 @@ def get_audit_logs(
 
 
 @router.get("/info")
-def get_log_info():
+def get_log_info(request: Request):
     """Return log file paths, sizes, and current session info.
 
     Useful for the frontend to show log status and for debugging.
     The ``session_id`` identifies this API server process — use it
     to filter logs to just this session.
     """
+    _require_admin(request)
     data_dir = os.environ.get("OCP_DATA_DIR", "data")
     paths = get_log_file_paths(data_dir)
 

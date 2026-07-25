@@ -2,9 +2,9 @@
 
 import os
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ..deps import get_config, get_policy_store
+from ..deps import get_config, get_policy_store, request_is_admin
 from ...core.config import ConfigLoader
 from ...core.crawler import AsyncCrawler
 from ...core.extractor import HtmlExtractor
@@ -161,13 +161,32 @@ async def run_url_analysis(
     return response
 
 
+# Secret-bearing fields on OutputSettings that must never leave the server,
+# even to an authenticated admin, through this diagnostic endpoint.
+_SECRET_SETTING_FIELDS = ("google_credentials_b64",)
+
+
 @router.get("/config/keywords")
-def get_keywords_config(config: ConfigLoader = Depends(get_config)):
-    """Get keywords configuration."""
+def get_keywords_config(request: Request, config: ConfigLoader = Depends(get_config)):
+    """Get keywords configuration (admin-only)."""
+    if not request_is_admin(request):
+        raise HTTPException(status_code=403, detail="Administrator access required")
     return config.keywords_config
 
 
 @router.get("/config/settings")
-def get_settings(config: ConfigLoader = Depends(get_config)):
-    """Get application settings."""
-    return config.settings.model_dump()
+def get_settings(request: Request, config: ConfigLoader = Depends(get_config)):
+    """Get application settings (admin-only, secrets redacted).
+
+    Admin-gated like every other config-exposing route; additionally, the
+    Google service-account credentials blob is stripped unconditionally so a
+    secret can never flow out through this diagnostic endpoint again.
+    """
+    if not request_is_admin(request):
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    settings = config.settings.model_dump()
+    output = settings.get("output")
+    if isinstance(output, dict):
+        for field in _SECRET_SETTING_FIELDS:
+            output.pop(field, None)
+    return settings
