@@ -53,6 +53,19 @@ describe('SourcesPanel fetching and summary', () => {
     await waitFor(() => expect(screen.getByText(/3 sources/)).toBeInTheDocument());
     expect(screen.getByText(/2 enabled/)).toBeInTheDocument();
     expect(screen.getByText(/2 API connectors/)).toBeInTheDocument();
+  });
+
+  it('labels keyless connectors "No key needed", not configured or missing', async () => {
+    global.fetch = mockFetch();
+    render(<SourcesPanel />);
+
+    await waitFor(() => expect(screen.getByText('Riksdagen Open Data API')).toBeInTheDocument());
+    const keylessRow = screen.getByText('Riksdagen Open Data API').closest('tr')
+      || screen.getByText('Riksdagen Open Data API').closest('li');
+    expect(within(keylessRow).getByText('No key needed')).toBeInTheDocument();
+    const keyedRow = screen.getByText('LegiScan').closest('tr')
+      || screen.getByText('LegiScan').closest('li');
+    expect(within(keyedRow).getByText('Key missing')).toBeInTheDocument();
     expect(screen.getByText(/1 missing keys?/)).toBeInTheDocument();
   });
 
@@ -75,7 +88,7 @@ describe('SourcesPanel fetching and summary', () => {
     expect(within(legiscanRow).getByText(/missing/i)).toBeInTheDocument();
 
     const riksdagenRow = screen.getByText('Riksdagen Open Data API').closest('tr');
-    expect(within(riksdagenRow).getByText(/configured|set/i)).toBeInTheDocument();
+    expect(within(riksdagenRow).getByText('No key needed')).toBeInTheDocument();
   });
 });
 

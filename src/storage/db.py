@@ -9,7 +9,7 @@ Schema
 - ``policies`` / ``leads``: primary-keyed tables with a handful of typed
   columns (for SQL filtering) plus a ``raw`` JSON column holding the
   complete original dict. ``raw`` is the source of truth for round-tripping
-  — callers must get back exactly what the JSON file version returned.
+  - callers must get back exactly what the JSON file version returned.
 - ``kv``: small bookkeeping counters (ask usage, LegiScan usage/seen,
   NIM seen) that used to live in their own tiny JSON files.
 - ``jurisdictions``: a read-only mirror of ``config/jurisdictions.yaml``,
@@ -18,7 +18,7 @@ Schema
 - ``policies_fts``: an FTS5 external-content index over policy_name,
   summary, key_requirements, and jurisdiction, kept in sync by triggers.
   If the local SQLite build lacks FTS5, the table and triggers are simply
-  not created — callers detect this with :func:`fts5_enabled` and fall
+  not created - callers detect this with :func:`fts5_enabled` and fall
   back to a LIKE query.
 
 Migration
@@ -30,7 +30,7 @@ everything into a fresh db in one transaction, then verifies every record
 round-trips byte-for-byte before considering the migration successful. On
 any mismatch it raises and deletes the partial db, so a later run gets a
 clean second attempt. The legacy JSON files themselves are never modified
-or deleted — they are the rollback path.
+or deleted - they are the rollback path.
 """
 
 import json
@@ -117,6 +117,26 @@ CREATE TABLE IF NOT EXISTS scans (
 CREATE INDEX IF NOT EXISTS idx_scans_domain_group ON scans(domain_group);
 CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);
 CREATE INDEX IF NOT EXISTS idx_scans_started_at ON scans(started_at);
+
+CREATE TABLE IF NOT EXISTS schedules (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    domains TEXT NOT NULL,
+    channels TEXT,
+    deep INTEGER DEFAULT 0,
+    topic TEXT,
+    cadence TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    monthly_ceiling_usd REAL,
+    paused_reason TEXT,
+    last_run_at TEXT,
+    last_scan_id TEXT,
+    next_run_at TEXT,
+    created_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
+CREATE INDEX IF NOT EXISTS idx_schedules_next_run_at ON schedules(next_run_at);
 """
 
 _SCHEMA_FTS5 = """
@@ -240,12 +260,12 @@ def build_fts_match_query(query: str) -> str:
     """Turn free text into a safe FTS5 MATCH expression.
 
     Every whitespace-separated token is wrapped in double quotes (doubling
-    any embedded quote), which forces FTS5 to treat it as a literal phrase —
+    any embedded quote), which forces FTS5 to treat it as a literal phrase -
     ``AND``/``OR``/``NOT``, parentheses, ``*``, and column-filter ``:``
     syntax are all neutralized this way. The quoted tokens are implicitly
     ANDed by FTS5, and a trailing ``*`` on the last one turns it into a
     prefix match (FTS5 supports a prefix ``*`` immediately after a quoted
-    phrase's closing quote — it matches the phrase's final token as a
+    phrase's closing quote - it matches the phrase's final token as a
     prefix rather than a whole term).
     """
     tokens = query.split()

@@ -1,4 +1,4 @@
-"""Shared FastAPI dependencies — singletons for config, scan manager, etc."""
+"""Shared FastAPI dependencies - singletons for config, scan manager, etc."""
 
 import hmac
 import os
@@ -14,7 +14,7 @@ from ..storage.store import PolicyStore
 # Loopback addresses trusted when ADMIN_TOKEN is unset (see request_is_admin).
 LOOPBACK_HOSTS = {"127.0.0.1", "::1"}
 # Starlette's TestClient has no real socket and reports its own host as the
-# literal string "testclient" — the unit test suite runs with ADMIN_TOKEN
+# literal string "testclient" - the unit test suite runs with ADMIN_TOKEN
 # stripped (see tests/conftest.py) and depends on this counting as trusted.
 TESTCLIENT_HOST = "testclient"
 
@@ -26,7 +26,7 @@ def request_is_admin(request) -> bool:
     routes that clamp public visibility (policies/coverage) can use the same
     admin/non-admin line. ADMIN_TOKEN set: only a matching X-Admin-Token
     header counts, full stop. ADMIN_TOKEN unset: same loopback-only open-mode
-    semantics as the middleware — a forwarded header means the request
+    semantics as the middleware - a forwarded header means the request
     traversed a reverse proxy, so a loopback TCP peer is the proxy itself,
     not the operator, and counts as remote.
     """
@@ -45,7 +45,7 @@ def request_is_admin(request) -> bool:
 # get_config()/get_scan_manager() used to be plain @lru_cache singletons.
 # WP-8 needs to rebuild the config from disk at runtime (POST
 # /api/config/reload) and swap it in atomically, so both are now a
-# module-level holder dict instead — same "build once, reuse" behavior, but
+# module-level holder dict instead - same "build once, reuse" behavior, but
 # swappable. ScanManager.config is a plain attribute (no property needed): a
 # successful reload also reassigns it on the already-built ScanManager
 # singleton, since ScanManager captured the pre-reload ConfigLoader instance
@@ -62,7 +62,7 @@ def _build_config() -> ConfigLoader:
     except yaml.YAMLError as e:
         # ConfigLoader wraps some load errors (e.g. a broken domains/*.yaml
         # file) in ConfigurationError already, but a malformed settings.yaml
-        # or keywords.yaml raises a bare YAMLError — normalize both to
+        # or keywords.yaml raises a bare YAMLError - normalize both to
         # ConfigurationError here so reload_config()'s caller (the
         # /api/config/reload route) has exactly one exception type to catch.
         raise ConfigurationError(f"Invalid YAML in config: {e}") from e
@@ -78,14 +78,14 @@ def get_config() -> ConfigLoader:
 
 def get_config_version() -> int:
     """Monotonically increasing counter, bumped on every successful build or
-    reload — lets GET /health show staleness."""
+    reload - lets GET /health show staleness."""
     return _config_state["version"]
 
 
 def reload_config() -> ConfigLoader:
     """Rebuild ``ConfigLoader`` from YAML on disk and swap it in.
 
-    Raises ``ConfigurationError`` (propagated, uncaught) on a YAML error —
+    Raises ``ConfigurationError`` (propagated, uncaught) on a YAML error -
     the previous config is left untouched and keeps serving; the version
     counter is not bumped. On success, the new instance becomes what
     ``get_config()`` returns, the version bumps by one, and the already-built
@@ -155,6 +155,13 @@ def get_keyword_overrides_store():
     from ..storage.keyword_overrides import KeywordOverridesStore
     data_dir = os.environ.get("OCP_DATA_DIR", "data")
     return KeywordOverridesStore(data_dir=data_dir)
+
+
+@lru_cache()
+def get_schedules_store():
+    from ..storage.schedules import SchedulesStore
+    data_dir = os.environ.get("OCP_DATA_DIR", "data")
+    return SchedulesStore(data_dir=data_dir)
 
 
 def get_scan_manager() -> ScanManager:

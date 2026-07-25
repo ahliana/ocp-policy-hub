@@ -1,4 +1,4 @@
-"""Parallel scan manager — dispatches domain workers, tracks progress, broadcasts events.
+"""Parallel scan manager - dispatches domain workers, tracks progress, broadcasts events.
 
 Policies are persisted to data/policies.json as each domain completes, so
 results survive crashes even if the full scan hasn't finished. Google Sheets
@@ -53,7 +53,7 @@ class ScanManager:
         self.data_dir = data_dir
         # Optional (WP-8): a src.storage.domain_overrides.DomainOverridesStore.
         # None (the default every existing test and call site relies on)
-        # means "no overlay" — start_scan/estimate_cost behave exactly as
+        # means "no overlay" - start_scan/estimate_cost behave exactly as
         # before. deps.get_scan_manager() wires in the real store.
         self.domain_overrides_store = domain_overrides_store
 
@@ -118,7 +118,7 @@ class ScanManager:
                 d for d in domains
                 if policy_type in d.get("policy_types", [])
             ]
-        # Channel scoping — "news" has its own runner and matches no
+        # Channel scoping - "news" has its own runner and matches no
         # domain here, so channels=["news"] naturally yields 0 domains.
         domains = [d for d in domains if self._domain_channel(d) in channels]
         if deep:
@@ -172,7 +172,7 @@ class ScanManager:
     def _domain_channel(domain: dict) -> str:
         """Classify a domain into a scan channel based on its source_type.
 
-        'news' is never produced here — it has its own runner outside
+        'news' is never produced here - it has its own runner outside
         scan_manager, so requesting channels=['news'] alone filters out
         every domain (0 domains, handled by the normal empty-scan path).
         """
@@ -190,8 +190,8 @@ class ScanManager:
         Structured sources (law APIs, transposition trackers) query an
         official index directly: they are fast, cheap, and account for most
         of what a scan finds. Crawls are the long tail. Config file order
-        would otherwise scatter the APIs through the queue — a 165-domain
-        US scan buried them at positions 40, 101 and 119 — so the useful
+        would otherwise scatter the APIs through the queue - a 165-domain
+        US scan buried them at positions 40, 101 and 119 - so the useful
         results arrived last and Stop threw them away.
         """
         return sorted(
@@ -265,7 +265,7 @@ class ScanManager:
             domain_group=job.domain_group,
         )
 
-        # Persisted scan history (WP-5) — a row per scan, next to the audit
+        # Persisted scan history (WP-5) - a row per scan, next to the audit
         # trail above. Written at start, updated at completion/failure/
         # cancellation (see the three record_completion() calls below).
         history = ScanHistoryStore(data_dir=self.data_dir)
@@ -300,12 +300,12 @@ class ScanManager:
         keyword_matcher = build_keyword_matcher(self.config, self.data_dir)
         verifier = Verifier()
 
-        # Per-domain persistence — saves policies to data/policies.json as each
+        # Per-domain persistence - saves policies to data/policies.json as each
         # domain completes, so results survive crashes. Uses atomic writes and
         # deduplication by URL.
         store = PolicyStore(data_dir=self.data_dir)
 
-        # Incremental Google Sheets export — write policies as each domain
+        # Incremental Google Sheets export - write policies as each domain
         # completes, not just at scan end.  This means if the user quits
         # mid-scan, all policies found so far are already in the Sheet.
         sheets_client = None
@@ -327,7 +327,7 @@ class ScanManager:
                 sheets_status.connected = True
                 sheets_status.status = "connected"
                 logger.info(
-                    f"Google Sheets connected — {len(sheets_exported_urls)} "
+                    f"Google Sheets connected - {len(sheets_exported_urls)} "
                     f"existing policies in '{sheet_name}'"
                 )
             except Exception as e:
@@ -431,7 +431,7 @@ class ScanManager:
                         self._policies[scan_id].extend(policies)
                         job.policy_count += len(policies)
 
-                        # Export to Google Sheets immediately — don't wait for
+                        # Export to Google Sheets immediately - don't wait for
                         # scan completion.  If the user quits mid-scan, these
                         # policies are already safe in the Sheet.
                         if sheets_client:
@@ -551,7 +551,7 @@ class ScanManager:
             # Save cache
             cache.save()
 
-            # Final Google Sheets reconciliation — catch any policies that
+            # Final Google Sheets reconciliation - catch any policies that
             # slipped through the per-domain export (e.g. if Sheets was
             # temporarily unavailable for one domain).  When incremental
             # export is working, this usually finds nothing new.
@@ -572,7 +572,7 @@ class ScanManager:
                     sheets_status.error = str(e)
                     logger.warning(f"Final Sheets export failed: {e}")
             elif not sheets_client and all_policies:
-                # Sheets wasn't configured or connection failed at start —
+                # Sheets wasn't configured or connection failed at start -
                 # try once more as a fallback
                 if output_cfg.spreadsheet_id and output_cfg.google_credentials_b64:
                     try:
@@ -602,7 +602,7 @@ class ScanManager:
                             f"Fallback Sheets export failed: {e}"
                         )
 
-            # Rejected-status reconciliation — a policy rejected via the
+            # Rejected-status reconciliation - a policy rejected via the
             # review workflow (any time, not just this scan) gets its
             # Staging row's Review Status flipped to "rejected" too.
             # One-way, app -> sheet, never the reverse.
@@ -709,14 +709,24 @@ class ScanManager:
     # doubles the pass rate used for the standard estimate below.
     DEEP_KEYWORD_PASS_RATE = 0.20
 
-    def estimate_cost(self, domains_group: str, deep: bool = False) -> dict:
+    def estimate_cost(
+        self, domains_group: str, deep: bool = False, channels: Optional[list[str]] = None,
+    ) -> dict:
         """Estimate API costs for a scan.
 
         Raises ConfigurationError (via get_enabled_domains) for an unknown
-        group/region/domain scope — callers (the API route) turn that into a
+        group/region/domain scope - callers (the API route) turn that into a
         400, mirroring domains.py's list_domains.
+
+        ``channels`` (optional) narrows the domain set to those matching the
+        selected scan channels, exactly like start_scan does - so a schedule
+        scoped to only law databases isn't costed as if it also crawled every
+        website. ``None`` (the default) counts every domain, preserving the
+        behavior of callers that don't pass it (e.g. cost_projection).
         """
         domains = self._overlay_domains(self.config.get_enabled_domains(domains_group))
+        if channels is not None:
+            domains = [d for d in domains if self._domain_channel(d) in channels]
         settings = self.config.settings
 
         max_pages_per_domain = settings.crawl.max_pages_per_domain

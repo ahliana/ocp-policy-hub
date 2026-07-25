@@ -1,4 +1,4 @@
-"""FastAPI application — REST API + WebSocket for OCP CE HR Policy Searcher."""
+"""FastAPI application - REST API + WebSocket for OCP CE HR Policy Searcher."""
 
 import logging
 import os
@@ -12,10 +12,14 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from ..core.log_setup import setup_logging
-from .deps import get_config_version, get_public_visibility_store, request_is_admin
+from ..orchestration.schedule_runner import ScheduleRunner
+from .deps import (
+    get_config_version, get_public_visibility_store, get_scan_manager,
+    get_schedules_store, request_is_admin,
+)
 from .routes import (
     domains, scans, policies, analysis, agent, ask, coverage, cost_projection,
-    config_admin, keywords_admin, leads, logs, search, settings, sources_admin,
+    config_admin, keywords_admin, leads, logs, schedules, search, settings, sources_admin,
 )
 from .static_site import mount_frontend
 
@@ -41,7 +45,19 @@ async def lifespan(app: FastAPI):
     # (including cron-triggered ones) run on the chosen models.
     from .deps import get_config, get_cost_settings_store
     get_cost_settings_store().apply_to_config(get_config())
+
+    # In-app scheduled scans (WP-11): a plain asyncio background task, not
+    # APScheduler or any other new dependency - see schedule_runner.py.
+    # Started here and cancelled on shutdown below, same lifecycle as any
+    # other per-process singleton wired through deps.py.
+    runner = ScheduleRunner(
+        get_scan_manager(), get_schedules_store(), data_dir=os.environ["OCP_DATA_DIR"],
+    )
+    runner.start()
+
     yield
+
+    await runner.stop()
     logging.getLogger("ocp").info("OCP CE HR Policy Searcher shutting down")
 
 
@@ -74,7 +90,7 @@ class AdminGateMiddleware(BaseHTTPMiddleware):
     When ADMIN_TOKEN is set, every non-GET /api request (except explicit
     exemptions) must carry a matching X-Admin-Token header. Reading stays
     open; scanning, chatting, settings, and review actions become
-    admin-only — the access model agreed at the 2026-07-07 OCP call.
+    admin-only - the access model agreed at the 2026-07-07 OCP call.
 
     When ADMIN_TOKEN is unset, the server is assumed to be a local,
     single-user deployment: non-GET /api requests are only accepted from
@@ -116,7 +132,7 @@ class AdminGateMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(AdminGateMiddleware)
 
-# CORS — allow React frontend
+# CORS - allow React frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -144,6 +160,7 @@ app.include_router(sources_admin.router)
 app.include_router(keywords_admin.router)
 app.include_router(leads.router)
 app.include_router(logs.router)
+app.include_router(schedules.router)
 app.include_router(search.router)
 app.include_router(settings.router)
 
@@ -177,7 +194,7 @@ def health(visibility_store=Depends(get_public_visibility_store)):
 
 
 # Serve the built React app (frontend/build) from this same process, if it
-# exists. In every current dev/test setup it doesn't, so this is a no-op —
+# exists. In every current dev/test setup it doesn't, so this is a no-op -
 # behavior above is unchanged.
 mount_frontend(
     app,

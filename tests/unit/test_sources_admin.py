@@ -2,7 +2,7 @@
 
 Admin-only visibility into every configured domain: YAML-enabled state, the
 WP-8 enabled overlay, and (for structured connectors) whether their required
-API key env var is set — reusing src/sources/check.py's source_key_status()
+API key env var is set - reusing src/sources/check.py's source_key_status()
 rather than duplicating key-readiness logic. No key values ever appear in
 the response.
 """
@@ -27,7 +27,9 @@ class TestBuildSourceRows:
         assert rows[0]["key_status"] is None
         assert rows[0]["type"] == "crawl"
 
-    def test_connector_domain_reports_key_status(self, monkeypatch):
+    def test_keyless_connector_reports_ready_not_missing(self, monkeypatch):
+        # 18 of the 23 connectors need no key at all - "configured: False"
+        # for them would read as 18 bogus missing-key badges in the UI.
         from src.api.routes import sources_admin
 
         monkeypatch.setattr(
@@ -36,7 +38,7 @@ class TestBuildSourceRows:
         )
         domains = [{"id": "d1", "name": "D1", "source_type": "riksdagen"}]
         rows = build_source_rows(domains, {})
-        assert rows[0]["key_status"] == {"required_env": None, "configured": False}
+        assert rows[0]["key_status"] == {"required_env": None, "configured": True}
 
     def test_connector_missing_key_reported(self, monkeypatch):
         from src.api.routes import sources_admin

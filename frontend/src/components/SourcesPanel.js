@@ -6,6 +6,7 @@ const PAGE_SIZE = 50;
 
 function keyStatusLabel(keyStatus) {
     if (!keyStatus) return '-';
+    if (!keyStatus.required_env) return 'No key needed';
     return keyStatus.configured ? 'Key configured' : 'Key missing';
 }
 

@@ -14,6 +14,7 @@ import LibraryView from './LibraryView';
 import PolicyScannerHeader from './PolicyScannerHeader';
 import PublicVisibilityControl from './PublicVisibilityControl';
 import ReviewInbox from './ReviewInbox';
+import SchedulesPanel from './SchedulesPanel';
 import SearchPanel from './SearchPanel';
 import SourcesPanel from './SourcesPanel';
 import WorldMap from './WorldMap';
@@ -210,6 +211,7 @@ function AgentPanel({
                     <CostPlanner />
                     <SourcesPanel />
                     <KeywordsPanel />
+                    <SchedulesPanel />
                 </div>
             ) : (
                 <p className="admin-readonly-note" role="status">
