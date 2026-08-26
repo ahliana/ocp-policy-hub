@@ -1,6 +1,11 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, configure, renderHook, waitFor } from '@testing-library/react';
 import useCostEstimate from './useCostEstimate';
 import { setAdminToken } from '../utils/adminAuth';
+
+// The hook debounces its fetch by 300ms (WP-17); give waitFor enough real-time
+// headroom above that so a slow CI machine doesn't turn the debounce itself
+// into a flaky timeout.
+configure({ asyncUtilTimeout: 3000 });
 
 const ESTIMATE_RESPONSE = {
   domain_count: 5,
@@ -102,6 +107,15 @@ describe('useCostEstimate', () => {
     expect(result.current.costEstimateText.length).toBeGreaterThan(0);
   });
 
+  it('shows an explanatory idle message when nothing is selected (WP-17)', () => {
+    const { result } = renderHook(() => useCostEstimate({ selectedRegions: [], mode: 'standard' }));
+
+    expect(result.current.costStatus).toBe('idle');
+    expect(result.current.costEstimateText).toBe(
+      'Pick a place or sources above to see the cost before anything runs.',
+    );
+  });
+
   it('maps a 401 to a sign-in message', async () => {
     global.fetch = jest.fn(async () => jsonResponse(401, {}));
     const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
@@ -180,6 +194,51 @@ describe('useCostEstimate', () => {
 
       await waitFor(() => expect(result.current.costStatus).toBe('bad_scope'));
       expect(result.current.domainCount).toBeNull();
+    });
+  });
+
+  describe('debounce (WP-17)', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('coalesces two rapid selection changes into exactly one fetch call', () => {
+      jest.useFakeTimers();
+      const fetchMock = jest.fn(() => new Promise(() => {})); // never resolves - only call count matters here
+      global.fetch = fetchMock;
+
+      const { rerender } = renderHook(
+        ({ selectedRegions }) => useCostEstimate({ selectedRegions, mode: 'standard' }),
+        { initialProps: { selectedRegions: ['quick'] } },
+      );
+
+      // First change starts a 300ms timer; a second change 100ms later must
+      // cancel it and start a fresh one, rather than adding a second call.
+      act(() => { jest.advanceTimersByTime(100); });
+      rerender({ selectedRegions: ['quick', 'eu'] });
+
+      act(() => { jest.advanceTimersByTime(299); });
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      act(() => { jest.advanceTimersByTime(1); });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      const [calledUrl] = fetchMock.mock.calls[0];
+      expect(new URL(String(calledUrl)).searchParams.get('domains')).toBe('quick,eu');
+    });
+
+    it('fires immediately-set costStatus of "loading" before the debounced fetch resolves', () => {
+      jest.useFakeTimers();
+      const fetchMock = jest.fn(() => new Promise(() => {}));
+      global.fetch = fetchMock;
+
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      expect(result.current.costStatus).toBe('loading');
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      act(() => { jest.advanceTimersByTime(300); });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -79,6 +79,15 @@ describe('SourcesPanel fetching and summary', () => {
     expect(within(row).getByText(/sweden/)).toBeInTheDocument();
   });
 
+  it('renders the table inside an admin-table-wrap container (WP-15)', async () => {
+    global.fetch = mockFetch();
+    render(<SourcesPanel />);
+
+    await waitFor(() => expect(screen.getByText('Swedish Energy Agency')).toBeInTheDocument());
+    const table = screen.getByRole('table');
+    expect(table.closest('.admin-table-wrap')).not.toBeNull();
+  });
+
   it('shows a key-status badge for connectors and none for crawl rows', async () => {
     global.fetch = mockFetch();
     render(<SourcesPanel />);

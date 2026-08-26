@@ -285,103 +285,105 @@ function SchedulesPanel() {
             {loadError && <p role="alert">{loadError}</p>}
             {actionError && <p role="alert">{actionError}</p>}
 
-            <table className="schedules-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Scope</th>
-                        <th>Cadence</th>
-                        <th>Enabled</th>
-                        <th>Last run</th>
-                        <th>Next run</th>
-                        <th>Per run</th>
-                        <th>Per month</th>
-                        <th>Ceiling</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {schedules.map((schedule) => (
-                        <tr key={schedule.id}>
-                            <td>{schedule.name}</td>
-                            <td>{schedule.domains}</td>
-                            <td>{formatCadence(schedule.cadence)}</td>
-                            <td>
-                                <button
-                                    type="button"
-                                    className="button"
-                                    aria-label={`Toggle ${schedule.name}`}
-                                    onClick={() => handleToggleEnabled(schedule)}
-                                >
-                                    {schedule.enabled ? 'Enabled' : 'Disabled'}
-                                </button>
-                            </td>
-                            <td>
-                                {schedule.last_scan_id
-                                    ? `${schedule.last_scan_id} @ ${formatDateTime(schedule.last_run_at)}`
-                                    : 'Never run'}
-                            </td>
-                            <td>{formatDateTime(schedule.next_run_at)}</td>
-                            <td>{formatUsd(schedule.estimate_usd)}</td>
-                            <td>{formatUsd(schedule.per_month_usd)}</td>
-                            <td>
-                                {formatUsd(schedule.monthly_ceiling_usd)}
-                                {schedule.paused_reason && (
-                                    <>
-                                        {' '}
-                                        <span className="schedule-paused-badge">Paused</span>
-                                        <p role="note" className="schedule-paused-reason">
-                                            {schedule.paused_reason}
-                                        </p>
-                                    </>
-                                )}
-                            </td>
-                            <td>
-                                <button
-                                    type="button"
-                                    className="button"
-                                    onClick={() => handleRunNow(schedule)}
-                                >
-                                    Run now
-                                </button>
-                                <button
-                                    type="button"
-                                    className="button"
-                                    onClick={() => handleEdit(schedule)}
-                                >
-                                    Edit
-                                </button>
-                                {confirmDeleteId === schedule.id ? (
-                                    <>
-                                        <button
-                                            type="button"
-                                            className="button"
-                                            onClick={() => handleDelete(schedule)}
-                                        >
-                                            Confirm delete
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="button"
-                                            onClick={() => setConfirmDeleteId(null)}
-                                        >
-                                            Cancel
-                                        </button>
-                                    </>
-                                ) : (
+            <div className="admin-table-wrap">
+                <table className="schedules-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Scope</th>
+                            <th>Cadence</th>
+                            <th>Enabled</th>
+                            <th>Last run</th>
+                            <th>Next run</th>
+                            <th>Per run</th>
+                            <th>Per month</th>
+                            <th>Ceiling</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {schedules.map((schedule) => (
+                            <tr key={schedule.id}>
+                                <td>{schedule.name}</td>
+                                <td>{schedule.domains}</td>
+                                <td>{formatCadence(schedule.cadence)}</td>
+                                <td>
                                     <button
                                         type="button"
                                         className="button"
-                                        onClick={() => setConfirmDeleteId(schedule.id)}
+                                        aria-label={`Toggle ${schedule.name}`}
+                                        onClick={() => handleToggleEnabled(schedule)}
                                     >
-                                        Delete
+                                        {schedule.enabled ? 'Enabled' : 'Disabled'}
                                     </button>
-                                )}
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
+                                </td>
+                                <td>
+                                    {schedule.last_scan_id
+                                        ? `${schedule.last_scan_id} @ ${formatDateTime(schedule.last_run_at)}`
+                                        : 'Never run'}
+                                </td>
+                                <td>{formatDateTime(schedule.next_run_at)}</td>
+                                <td>{formatUsd(schedule.estimate_usd)}</td>
+                                <td>{formatUsd(schedule.per_month_usd)}</td>
+                                <td>
+                                    {formatUsd(schedule.monthly_ceiling_usd)}
+                                    {schedule.paused_reason && (
+                                        <>
+                                            {' '}
+                                            <span className="schedule-paused-badge">Paused</span>
+                                            <p role="note" className="schedule-paused-reason">
+                                                {schedule.paused_reason}
+                                            </p>
+                                        </>
+                                    )}
+                                </td>
+                                <td>
+                                    <button
+                                        type="button"
+                                        className="button"
+                                        onClick={() => handleRunNow(schedule)}
+                                    >
+                                        Run now
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="button"
+                                        onClick={() => handleEdit(schedule)}
+                                    >
+                                        Edit
+                                    </button>
+                                    {confirmDeleteId === schedule.id ? (
+                                        <>
+                                            <button
+                                                type="button"
+                                                className="button"
+                                                onClick={() => handleDelete(schedule)}
+                                            >
+                                                Confirm delete
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="button"
+                                                onClick={() => setConfirmDeleteId(null)}
+                                            >
+                                                Cancel
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            className="button"
+                                            onClick={() => setConfirmDeleteId(schedule.id)}
+                                        >
+                                            Delete
+                                        </button>
+                                    )}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
 
             <div className="schedules-create-form">
                 <h3>{editingId ? 'Edit schedule' : 'New schedule'}</h3>

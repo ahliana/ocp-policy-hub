@@ -322,11 +322,16 @@ select,
 .admin-area {
   grid-column: 1 / -1;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   padding: 16px;
   border: 2px solid #e0a640;
   border-radius: 10px;
   background-color: #fffaf0;
+}
+
+.admin-table-wrap {
+  overflow-x: auto;
 }
 
 .admin-mode-banner {
@@ -1121,4 +1126,411 @@ select,
 .library-pagination button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* --- Public visibility control (WP-16) --- */
+
+.public-visibility-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.public-visibility-option:first-of-type {
+  margin-top: 8px;
+}
+
+.public-visibility-option input[type="radio"] {
+  margin-top: 3px;
+}
+
+.public-visibility-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.public-visibility-option-label {
+  display: block;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.public-visibility-option-hint {
+  display: block;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+/* --- Cost planner (WP-15/WP-18) --- */
+
+.cost-planner {
+  padding: 16px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  background-color: #ffffff;
+}
+
+.cost-planner-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 480px;
+  margin: 10px 0 14px;
+}
+
+.cost-planner-controls label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.cost-planner-scope-select {
+  width: 100%;
+  max-width: 100%;
+}
+
+.cost-planner-error {
+  margin: 0 0 10px;
+  color: #92400e;
+  font-size: 13px;
+}
+
+.cost-planner-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.cost-planner-table th,
+.cost-planner-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.cost-planner-table th {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.cost-planner-total-row td {
+  font-weight: 600;
+}
+
+.cost-planner-empty {
+  margin: 10px 0;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.cost-planner-note {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+/* --- Sources panel (WP-15) --- */
+
+.sources-panel {
+  padding: 16px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  background-color: #ffffff;
+}
+
+.sources-summary {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.sources-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0 14px;
+}
+
+.sources-filters label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.sources-filters input[type="text"],
+.sources-filters select {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.sources-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.sources-table th,
+.sources-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.sources-table th {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.type-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background-color: #e2e8f0;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.key-status-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.key-status-ok {
+  background-color: #f0fdf4;
+  color: #166534;
+}
+
+.key-status-missing {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.sources-pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.sources-note {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+/* --- Keywords panel (WP-15) --- */
+
+.keywords-panel {
+  padding: 16px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  background-color: #ffffff;
+}
+
+.keyword-category {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #eef2f7;
+  border-radius: 6px;
+}
+
+.keyword-category summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.keyword-category-description {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.keyword-language-group {
+  margin-top: 10px;
+}
+
+.keyword-language-group h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.keyword-language-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.keyword-language-group li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.term-struck {
+  text-decoration: line-through;
+  color: #94a3b8;
+}
+
+.term-custom {
+  color: #166534;
+  font-weight: 600;
+}
+
+.keyword-add-term,
+.keyword-thresholds {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.keyword-add-term label,
+.keyword-thresholds label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.keyword-add-term input[type="text"],
+.keyword-thresholds input[type="number"] {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.keyword-thresholds-override-note,
+.keyword-calibration-note,
+.keyword-scope-note {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.button-link {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-left: 6px;
+  font: inherit;
+  color: #2563eb;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* --- Schedules panel (WP-15) --- */
+
+.schedules-panel {
+  padding: 16px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  background-color: #ffffff;
+}
+
+.schedules-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.schedules-table th,
+.schedules-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid #eef2f7;
+  vertical-align: top;
+}
+
+.schedules-table th {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.schedule-paused-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background-color: #fef3c7;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.schedule-paused-reason {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #92400e;
+}
+
+.schedules-create-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 480px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #eef2f7;
+}
+
+.schedules-create-form h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  color: #0f172a;
+}
+
+.schedules-create-form label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.schedules-create-form input[type="text"],
+.schedules-create-form input[type="number"],
+.schedules-create-form select {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.schedules-create-form fieldset {
+  border: 1px solid #eef2f7;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.schedules-create-form legend {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.schedules-note {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: #64748b;
 }

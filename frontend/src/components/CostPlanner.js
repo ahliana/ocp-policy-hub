@@ -40,8 +40,8 @@ async function fetchProjection(groups, cadence) {
 // large figure is never mistaken for a grounded one.
 export const NO_HISTORY_NOTE =
     'Scopes marked * have no completed scans recorded yet - their figures come '
-    + 'from the pre-scan formula, which tends to run high. After a scope has run '
-    + 'twice, real recorded costs replace the formula automatically.';
+    + 'from the pre-scan formula, which tends to run high. After a scope has '
+    + 'completed two real scans, recorded costs replace the formula automatically.';
 
 export function scenariosLackHistory(scenarios) {
     return scenarios.some(({ projection }) => (
@@ -179,6 +179,7 @@ function CostPlanner() {
     };
 
     const groupEntries = Object.entries(groupOptions);
+    const hasAnyProjection = scenarios.some(({ projection }) => projection);
 
     return (
         <div className="cost-planner" aria-label="Cost planner">
@@ -192,6 +193,7 @@ function CostPlanner() {
                 <label htmlFor="cost-planner-scope-a">Scope groups (Scenario A)</label>
                 <select
                     id="cost-planner-scope-a"
+                    className="cost-planner-scope-select"
                     multiple
                     value={scopeA}
                     onChange={(event) => setScopeA(selectedValues(event))}
@@ -227,6 +229,7 @@ function CostPlanner() {
                         <label htmlFor="cost-planner-scope-b">Scope groups (Scenario B)</label>
                         <select
                             id="cost-planner-scope-b"
+                            className="cost-planner-scope-select"
                             multiple
                             value={scopeB}
                             onChange={(event) => setScopeB(selectedValues(event))}
@@ -241,46 +244,52 @@ function CostPlanner() {
 
             {error && <p className="cost-planner-error" role="alert">{error}</p>}
 
-            <table className="cost-planner-table">
-                <thead>
-                    <tr>
-                        {compareEnabled && <th>Scenario</th>}
-                        <th>Group</th>
-                        <th>Estimate/run</th>
-                        <th>Actual mean</th>
-                        <th>{`Projected/${cadence}`}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {scenarios.flatMap(({ name, projection }) => {
-                        if (!projection) return [];
-                        const itemRows = projection.items.map((item) => (
-                            <tr key={`${name}-${item.group}`}>
-                                {compareEnabled && <td>{name}</td>}
-                                <td>
-                                    {item.group}
-                                    {!item.history && (
-                                        <span title="No completed scans recorded for this scope yet"> *</span>
-                                    )}
-                                </td>
-                                <td>{formatUsd(item.estimate_usd)}</td>
-                                <td>{item.history ? formatUsd(item.history.mean_cost_usd) : '-'}</td>
-                                <td>{formatUsd(item.per_month_usd)}</td>
+            {hasAnyProjection ? (
+                <div className="admin-table-wrap">
+                    <table className="cost-planner-table">
+                        <thead>
+                            <tr>
+                                {compareEnabled && <th>Scenario</th>}
+                                <th>Group</th>
+                                <th>Estimate/run</th>
+                                <th>Actual mean</th>
+                                <th>{`Projected/${cadence}`}</th>
                             </tr>
-                        ));
-                        const totalRow = (
-                            <tr key={`${name}-total`} className="cost-planner-total-row">
-                                {compareEnabled && <td>{name}</td>}
-                                <td>Total</td>
-                                <td>-</td>
-                                <td>-</td>
-                                <td>{formatUsd(projection.total_per_month_usd)}</td>
-                            </tr>
-                        );
-                        return [...itemRows, totalRow];
-                    })}
-                </tbody>
-            </table>
+                        </thead>
+                        <tbody>
+                            {scenarios.flatMap(({ name, projection }) => {
+                                if (!projection) return [];
+                                const itemRows = projection.items.map((item) => (
+                                    <tr key={`${name}-${item.group}`}>
+                                        {compareEnabled && <td>{name}</td>}
+                                        <td>
+                                            {item.group}
+                                            {!item.history && (
+                                                <span title="No completed scans recorded for this scope yet"> *</span>
+                                            )}
+                                        </td>
+                                        <td>{formatUsd(item.estimate_usd)}</td>
+                                        <td>{item.history ? formatUsd(item.history.mean_cost_usd) : '-'}</td>
+                                        <td>{formatUsd(item.per_month_usd)}</td>
+                                    </tr>
+                                ));
+                                const totalRow = (
+                                    <tr key={`${name}-total`} className="cost-planner-total-row">
+                                        {compareEnabled && <td>{name}</td>}
+                                        <td>Total</td>
+                                        <td>-</td>
+                                        <td>-</td>
+                                        <td>{formatUsd(projection.total_per_month_usd)}</td>
+                                    </tr>
+                                );
+                                return [...itemRows, totalRow];
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            ) : (
+                <p className="cost-planner-empty">Pick one or more scope groups to see projected costs.</p>
+            )}
 
             {scenariosLackHistory(scenarios) && (
                 <p className="cost-planner-note" role="note">{NO_HISTORY_NOTE}</p>

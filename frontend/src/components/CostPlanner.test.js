@@ -133,6 +133,17 @@ describe('CostPlanner table rows', () => {
     expect(within(totalRow).getByText('$10.83')).toBeInTheDocument();
   });
 
+  it('renders the table inside an admin-table-wrap container (WP-15)', async () => {
+    global.fetch = mockFetch({ projectionByGroups: { quick: PROJECTION_A } });
+    render(<CostPlanner />);
+    await waitFor(() => expect(screen.getByText(/Quick scan/)).toBeInTheDocument());
+    await selectScopeA('quick');
+
+    await waitFor(() => expect(screen.getByText('quick')).toBeInTheDocument());
+    const table = screen.getByRole('table');
+    expect(table.closest('.admin-table-wrap')).not.toBeNull();
+  });
+
   it('shows "-" for actual mean when there is no history', async () => {
     global.fetch = mockFetch({ projectionByGroups: { eu: PROJECTION_B } });
     render(<CostPlanner />);
@@ -155,6 +166,18 @@ describe('CostPlanner table rows', () => {
     expect(screen.getByText('eu').closest('td')).toHaveTextContent('*');
   });
 
+  it('states in the no-history note that two real scans replace the formula (WP-18)', async () => {
+    global.fetch = mockFetch({ projectionByGroups: { eu: PROJECTION_B } });
+    render(<CostPlanner />);
+    await waitFor(() => expect(screen.getByText(/European Union/)).toBeInTheDocument());
+    await selectScopeA('eu');
+
+    await waitFor(() => expect(screen.getByText('eu')).toBeInTheDocument());
+    expect(screen.getByRole('note')).toHaveTextContent(
+      /After a scope has completed two real scans, recorded costs replace the formula automatically\./,
+    );
+  });
+
   it('shows no caveat note when every scope has history', async () => {
     global.fetch = mockFetch({ projectionByGroups: { quick: PROJECTION_A } });
     render(<CostPlanner />);
@@ -163,6 +186,29 @@ describe('CostPlanner table rows', () => {
 
     await waitFor(() => expect(screen.getByText('quick')).toBeInTheDocument());
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+});
+
+describe('CostPlanner empty state (WP-18)', () => {
+  it('shows a pick-a-scope message and no table when nothing is selected', async () => {
+    global.fetch = mockFetch();
+    render(<CostPlanner />);
+    await waitFor(() => expect(screen.getByText(/Quick scan/)).toBeInTheDocument());
+
+    expect(screen.getByText('Pick one or more scope groups to see projected costs.')).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('replaces the empty state with the table once a scope has a projection', async () => {
+    global.fetch = mockFetch({ projectionByGroups: { quick: PROJECTION_A } });
+    render(<CostPlanner />);
+    await waitFor(() => expect(screen.getByText(/Quick scan/)).toBeInTheDocument());
+    expect(screen.getByText('Pick one or more scope groups to see projected costs.')).toBeInTheDocument();
+
+    await selectScopeA('quick');
+
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+    expect(screen.queryByText('Pick one or more scope groups to see projected costs.')).not.toBeInTheDocument();
   });
 });
 

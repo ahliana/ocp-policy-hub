@@ -73,7 +73,7 @@ function PublicVisibilityControl() {
                         disabled={isSaving}
                         onChange={() => handleChange(option.value)}
                     />
-                    <span>
+                    <span className="public-visibility-option-text">
                         <span className="public-visibility-option-label">{option.label}</span>
                         <span className="public-visibility-option-hint">{option.hint}</span>
                     </span>

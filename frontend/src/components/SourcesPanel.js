@@ -175,50 +175,52 @@ function SourcesPanel() {
 
             {toggleError && <p role="alert">{toggleError}</p>}
 
-            <table className="sources-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Type</th>
-                        <th>Regions</th>
-                        <th>Key status</th>
-                        <th>Enabled</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {pageRows.map((row) => (
-                        <tr key={row.id}>
-                            <td>{row.name}</td>
-                            <td><span className="type-badge">{row.type}</span></td>
-                            <td>{(row.region || []).join(', ')}</td>
-                            <td>
-                                {row.key_status && (
-                                    <span
-                                        className={
-                                            row.key_status.configured
-                                                ? 'key-status-badge key-status-ok'
-                                                : 'key-status-badge key-status-missing'
-                                        }
-                                    >
-                                        {keyStatusLabel(row.key_status)}
-                                    </span>
-                                )}
-                                {!row.key_status && '-'}
-                            </td>
-                            <td>
-                                <button
-                                    type="button"
-                                    className="button"
-                                    aria-label={`Toggle ${row.name}`}
-                                    onClick={() => handleToggle(row)}
-                                >
-                                    {row.effective_enabled ? 'Enabled' : 'Disabled'}
-                                </button>
-                            </td>
+            <div className="admin-table-wrap">
+                <table className="sources-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Regions</th>
+                            <th>Key status</th>
+                            <th>Enabled</th>
                         </tr>
-                    ))}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        {pageRows.map((row) => (
+                            <tr key={row.id}>
+                                <td>{row.name}</td>
+                                <td><span className="type-badge">{row.type}</span></td>
+                                <td>{(row.region || []).join(', ')}</td>
+                                <td>
+                                    {row.key_status && (
+                                        <span
+                                            className={
+                                                row.key_status.configured
+                                                    ? 'key-status-badge key-status-ok'
+                                                    : 'key-status-badge key-status-missing'
+                                            }
+                                        >
+                                            {keyStatusLabel(row.key_status)}
+                                        </span>
+                                    )}
+                                    {!row.key_status && '-'}
+                                </td>
+                                <td>
+                                    <button
+                                        type="button"
+                                        className="button"
+                                        aria-label={`Toggle ${row.name}`}
+                                        onClick={() => handleToggle(row)}
+                                    >
+                                        {row.effective_enabled ? 'Enabled' : 'Disabled'}
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
 
             <div className="sources-pagination">
                 <button

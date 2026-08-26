@@ -1,0 +1,59 @@
+// Real-viewport smoke test for WP-15 (admin frame containment). Confirms
+// every panel inside the admin area stays within its right edge, and that
+// the page itself never grows a horizontal scrollbar, at both a laptop and
+// a wide-desktop viewport. Expects a local, ungated deployment (no
+// ADMIN_TOKEN), which is the development default - same setup as
+// map.spec.js:
+//
+//   npx playwright install chromium   # once
+//   npm run e2e
+const { test, expect } = require('@playwright/test');
+
+const VIEWPORTS = [
+  { width: 1280, height: 900 },
+  { width: 1920, height: 1080 },
+];
+
+VIEWPORTS.forEach(({ width, height }) => {
+  test.describe(`admin frame containment at ${width}x${height}`, () => {
+    test.use({ viewport: { width, height } });
+
+    test.beforeEach(async ({ page }) => {
+      await page.goto('/');
+      // A fresh profile gets the first-run welcome modal, exactly like a
+      // real first visitor - close it the way they would.
+      const welcomeClose = page.getByRole('button', { name: 'Close help window' });
+      if (await welcomeClose.isVisible().catch(() => false)) {
+        await welcomeClose.click();
+      }
+      await page.getByRole('button', { name: 'Admin', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Find new policies' })).toBeVisible();
+    });
+
+    test('every direct child panel stays within the admin area right edge', async ({ page }) => {
+      const adminArea = page.locator('.admin-area');
+      await expect(adminArea).toBeVisible();
+      const adminBox = await adminArea.boundingBox();
+      expect(adminBox).not.toBeNull();
+
+      const childCount = await adminArea.locator(':scope > *').count();
+      expect(childCount).toBeGreaterThan(0);
+
+      for (let i = 0; i < childCount; i += 1) {
+        const child = adminArea.locator(':scope > *').nth(i);
+        // Collapsed/zero-size children (e.g. a hidden note) contribute
+        // nothing to overflow and have no meaningful box to check.
+        const box = await child.boundingBox();
+        if (!box || box.width === 0) continue;
+        expect(box.x + box.width).toBeLessThanOrEqual(adminBox.x + adminBox.width + 1);
+      }
+    });
+
+    test('the page has no horizontal scrollbar', async ({ page }) => {
+      const overflow = await page.evaluate(() => (
+        document.body.scrollWidth - document.body.clientWidth
+      ));
+      expect(overflow).toBeLessThanOrEqual(0);
+    });
+  });
+});

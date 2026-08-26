@@ -108,6 +108,15 @@ describe('SchedulesPanel list rendering', () => {
     const row = screen.getByText('Monthly full scan').closest('tr');
     expect(within(row).queryByText(/paused/i)).not.toBeInTheDocument();
   });
+
+  it('renders the table inside an admin-table-wrap container (WP-15)', async () => {
+    global.fetch = mockFetch();
+    render(<SchedulesPanel />);
+
+    await waitFor(() => expect(screen.getByText('Monthly full scan')).toBeInTheDocument());
+    const table = screen.getByRole('table');
+    expect(table.closest('.admin-table-wrap')).not.toBeNull();
+  });
 });
 
 describe('SchedulesPanel create form', () => {

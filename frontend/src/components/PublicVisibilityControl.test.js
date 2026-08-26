@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import PublicVisibilityControl from './PublicVisibilityControl';
 import { setAdminToken } from '../utils/adminAuth';
 
@@ -70,5 +70,31 @@ describe('PublicVisibilityControl', () => {
         fireEvent.click(screen.getByRole('radio', { name: /reviewed only by default, visitors can switch/i }));
 
         expect(await screen.findByRole('alert')).toHaveTextContent(/could not save/i);
+    });
+
+    it('renders each option label and hint as distinct block-level elements (WP-16)', async () => {
+        global.fetch = mockFetch({ mode: 'default_all' });
+        render(<PublicVisibilityControl />);
+
+        await waitFor(() => {
+            expect(screen.getByRole('radio', { name: /all finds by default/i })).toBeChecked();
+        });
+
+        const label = screen.getByText('Show all finds by default');
+        const hint = screen.getByText(
+            'Visitors see everything except rejected finds; they can still switch to reviewed-only.',
+        );
+
+        expect(label).not.toBe(hint);
+        expect(label).toHaveClass('public-visibility-option-label');
+        expect(hint).toHaveClass('public-visibility-option-hint');
+        // Both live under the same option, but as separate elements - not
+        // concatenated text in one span.
+        const option = label.closest('.public-visibility-option');
+        expect(option).not.toBeNull();
+        expect(within(option).getByText('Show all finds by default')).toBe(label);
+        expect(within(option).getByText(
+            'Visitors see everything except rejected finds; they can still switch to reviewed-only.',
+        )).toBe(hint);
     });
 });

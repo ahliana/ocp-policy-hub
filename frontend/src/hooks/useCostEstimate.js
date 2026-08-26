@@ -38,6 +38,9 @@ function formatCostEstimateText(costStatus, costEstimate) {
     if (costStatus === 'loading') {
         return 'Estimating...';
     }
+    if (costStatus === 'idle') {
+        return 'Pick a place or sources above to see the cost before anything runs.';
+    }
     if (costStatus === 'filters_only') {
         return 'Select a scan target';
     }
@@ -59,12 +62,20 @@ function formatCostEstimateText(costStatus, costEstimate) {
         const filterNote = costEstimate.has_filters ? ', filters not included' : '';
         return `$${cost} (${targetLabel}${filterNote})`;
     }
+    // Truly-unknown fallback - every named costStatus has its own message above.
     return 'No cost estimate';
 }
 
 function useCostEstimate({ selectedRegions, mode }) {
     const [costEstimate, setCostEstimate] = useState(null);
     const [costStatus, setCostStatus] = useState('idle');
+
+    // A stable, content-derived key rather than the selectedRegions array
+    // reference itself - callers (and this hook's own tests) often pass a
+    // freshly-built array each render, and depending on the reference
+    // directly would re-run this effect - and reschedule the debounce timer
+    // - on every render even when the actual selection hasn't changed.
+    const selectionKey = selectedRegions.join(',');
 
     useEffect(() => {
         let isCurrent = true;
@@ -89,33 +100,40 @@ function useCostEstimate({ selectedRegions, mode }) {
         setCostStatus('loading');
         const domains = targets.map(normalizeTarget).join(',');
 
-        getCostEstimate(domains, mode === 'deep')
-            .then(async (response) => {
-                if (!isCurrent) return;
-                if (!response.ok) {
+        // Debounced 300ms - selection/mode changes within that window coalesce
+        // into one call instead of firing a request per click while a user is
+        // still assembling their scope.
+        const timerId = setTimeout(() => {
+            getCostEstimate(domains, mode === 'deep')
+                .then(async (response) => {
+                    if (!isCurrent) return;
+                    if (!response.ok) {
+                        setCostEstimate(null);
+                        setCostStatus(errorStatusForResponse(response.status));
+                        return;
+                    }
+                    const data = await response.json();
+                    if (!isCurrent) return;
+                    setCostEstimate({
+                        ...data,
+                        target_count: data.domain_count,
+                        has_filters: categories.length > 0 || tags.length > 0,
+                    });
+                    setCostStatus('ready');
+                })
+                .catch(() => {
+                    if (!isCurrent) return;
                     setCostEstimate(null);
-                    setCostStatus(errorStatusForResponse(response.status));
-                    return;
-                }
-                const data = await response.json();
-                if (!isCurrent) return;
-                setCostEstimate({
-                    ...data,
-                    target_count: data.domain_count,
-                    has_filters: categories.length > 0 || tags.length > 0,
+                    setCostStatus('error');
                 });
-                setCostStatus('ready');
-            })
-            .catch(() => {
-                if (!isCurrent) return;
-                setCostEstimate(null);
-                setCostStatus('error');
-            });
+        }, 300);
 
         return () => {
             isCurrent = false;
+            clearTimeout(timerId);
         };
-    }, [selectedRegions, mode]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectionKey, mode]);
 
     const costEstimateText = useMemo(
         () => formatCostEstimateText(costStatus, costEstimate),
