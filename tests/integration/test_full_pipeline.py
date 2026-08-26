@@ -1468,6 +1468,8 @@ class TestOnboardingFlow:
         _on_tool_result("unknown_tool", {"random": "data"})
         _on_tool_result("estimate_cost", "not a dict")
         # Should not raise — just produce no output
+        captured = capsys.readouterr()
+        assert captured.out == ""
 
     def test_interactive_ctrl_c_recovers(self, tmp_path):
         """Ctrl+C during agent.run() prints friendly message, doesn't crash."""

@@ -558,6 +558,8 @@ class TestSheetsClientExportTips:
 
         mock_spreadsheet.add_worksheet.assert_not_called()
         mock_spreadsheet.worksheet.assert_called_with("Tips")
+        assert mock_spreadsheet.add_worksheet.call_count == 0
+        assert mock_spreadsheet.worksheet.call_count == 1
 
     def test_exports_expected_columns(self):
         try:

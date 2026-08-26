@@ -14,7 +14,12 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def app_module():
+def app_module(monkeypatch):
+    # src.api.app calls load_dotenv(..., override=True) at import time, so
+    # every reload here would re-inject the developer's real .env - including
+    # ADMIN_TOKEN - and the verdict would depend on untracked local state.
+    # Neutralize it so the monkeypatched environment is the only input.
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
     import src.api.app as module
     yield module
 

@@ -540,6 +540,7 @@ class TestPlaywrightFetch:
         await crawler._fetch_playwright("https://spa.gov/crash")
 
         page.close.assert_awaited_once()
+        assert page.close.await_count == 1
 
     @pytest.mark.asyncio
     async def test_playwright_sets_user_agent(self):
@@ -551,6 +552,7 @@ class TestPlaywrightFetch:
         await crawler._fetch_playwright("https://spa.gov/page")
 
         browser.new_page.assert_awaited_once_with(user_agent="TestBot/1.0")
+        assert browser.new_page.call_args.kwargs["user_agent"] == "TestBot/1.0"
 
 
 class TestEnsurePlaywright:
@@ -661,6 +663,10 @@ class TestClosePlaywright:
         # No Playwright resources — should not raise
         await crawler.close()
 
+        assert crawler._client is None
+        assert crawler._pw_browser is None
+        assert crawler._playwright is None
+
     @pytest.mark.asyncio
     async def test_close_handles_both_httpx_and_playwright(self):
         crawler = AsyncCrawler()
@@ -676,6 +682,9 @@ class TestClosePlaywright:
         mock_client.aclose.assert_awaited_once()
         mock_browser.close.assert_awaited_once()
         mock_pw.stop.assert_awaited_once()
+        assert crawler._client is None
+        assert crawler._pw_browser is None
+        assert crawler._playwright is None
 
 
 class TestPlaywrightDomainConfig:

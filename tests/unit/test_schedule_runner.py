@@ -298,6 +298,7 @@ class TestResilience:
         manager = FakeManager()
         await run_due_schedules(manager, ExplodingStore(), data_dir=data_dir, now=datetime(2026, 1, 1))
         manager.start_scan.assert_not_awaited()
+        assert manager.start_scan.await_count == 0
 
 
 class TestClaimGuard:
@@ -342,6 +343,7 @@ class TestClaimGuard:
         await run_due_schedules(manager, store, data_dir=data_dir, now=now)
 
         manager.start_scan.assert_awaited_once()
+        assert manager.start_scan.await_count == 1
 
 
 class TestFireScheduleDirect:
