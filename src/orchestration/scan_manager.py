@@ -7,6 +7,7 @@ export and auditor still run at scan completion as a second layer.
 
 import asyncio
 import logging
+import sqlite3
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -15,7 +16,7 @@ from typing import Optional
 import structlog
 
 from ..core.cache import URLCache
-from ..core.config import ConfigLoader
+from ..core.config import ConfigLoader, ConfigurationError
 from ..core.log_setup import log_audit_event
 from ..core.crawler import AsyncCrawler
 from ..core.extractor import HtmlExtractor
@@ -47,6 +48,7 @@ class ScanManager:
         api_key: Optional[str] = None,
         data_dir: str = "data",
         domain_overrides_store=None,
+        scan_history_store: Optional[ScanHistoryStore] = None,
     ):
         self.config = config
         self.broadcaster = broadcaster
@@ -57,6 +59,12 @@ class ScanManager:
         # means "no overlay" - start_scan/estimate_cost behave exactly as
         # before. deps.get_scan_manager() wires in the real store.
         self.domain_overrides_store = domain_overrides_store
+        # Optional (WP-25): a src.storage.scan_history.ScanHistoryStore.
+        # None (the default every existing test and call site relies on)
+        # means estimate_cost() falls back to its static assumptions exactly
+        # as before - no ScanHistoryStore construction, so no disk access.
+        # deps.get_scan_manager() wires in the real (persisted) store.
+        self.scan_history_store = scan_history_store
         self._pricing = PricingLoader()
 
         self._jobs: dict[str, ScanJob] = {}
@@ -269,6 +277,11 @@ class ScanManager:
 
         job = self._jobs[scan_id]
 
+        # Per-domain scan channel (WP-23), keyed by domain_id - fed into
+        # record_domains() at scan end alongside each domain's final
+        # DomainProgress.
+        channel_by_domain_id = {d["id"]: self._domain_channel(d) for d in domains}
+
         log_audit_event(
             data_dir=self.data_dir,
             event="scan_started",
@@ -281,13 +294,57 @@ class ScanManager:
         # trail above. Written at start, updated at completion/failure/
         # cancellation (see the three record_completion() calls below).
         history = ScanHistoryStore(data_dir=self.data_dir)
+
+        # Estimate-vs-actual ledger (WP-24): the same estimate a cost-preview
+        # call would have returned for this exact scope/channels/deep,
+        # captured at the moment the scan actually started. Estimation
+        # failure (e.g. a since-removed pricing entry) must never block the
+        # scan itself - store NULLs and keep going.
+        estimated_cost_usd = estimated_low_usd = estimated_high_usd = None
+        try:
+            estimate = self.estimate_cost(
+                job.domain_group,
+                deep=job.options.get("deep", False),
+                channels=job.options.get("channels"),
+            )
+            estimated_cost_usd = estimate["estimated_cost_usd"]
+            estimated_low_usd = estimate["estimated_cost_low_usd"]
+            estimated_high_usd = estimate["estimated_cost_high_usd"]
+        except (ConfigurationError, ValueError, KeyError, sqlite3.Error) as e:
+            # The realistic estimate failures: scope/channel resolution
+            # (ConfigurationError), an empty pricing table (ValueError),
+            # and the measured-rates history read (sqlite3.Error).
+            logger.warning(f"Cost estimation failed for scan {scan_id}: {e}")
+
         history.record_start(
             scan_id=scan_id,
             domain_group=job.domain_group,
             mode="deep" if job.options.get("deep") else "standard",
             channels=job.options.get("channels", []),
             started_at=job.started_at,
+            estimated_cost_usd=estimated_cost_usd,
+            estimated_low_usd=estimated_low_usd,
+            estimated_high_usd=estimated_high_usd,
         )
+
+        def _persist_domain_funnel() -> None:
+            """Write this scan's per-domain funnel (WP-23), once, at scan
+            end - alongside record_completion() below. Never blocks scan
+            completion on a persistence failure."""
+            try:
+                history.record_domains(
+                    scan_id=scan_id,
+                    domains=[
+                        (dp, channel_by_domain_id.get(dp.domain_id, "crawl"))
+                        for dp in job.progress.domains
+                    ],
+                    completed_at=job.completed_at,
+                )
+            except sqlite3.Error as persist_err:
+                logger.warning(
+                    f"Failed to persist per-domain funnel for scan {scan_id}: "
+                    f"{persist_err}"
+                )
 
         await self.broadcaster.broadcast(ScanEvent(
             scan_id=scan_id,
@@ -434,6 +491,7 @@ class ScanManager:
                             dp.filtered_screening = scanner.progress.filtered_screening
                             dp.near_misses = scanner.progress.near_misses
                             dp.keywords_matched = scanner.progress.keywords_matched
+                            dp.llm_skipped = scanner.progress.llm_skipped
                             dp.policies_found = scanner.progress.policies_found
                             dp.errors = scanner.progress.errors
                             dp.error_message = scanner.progress.error_message
@@ -692,6 +750,7 @@ class ScanManager:
                     if job.started_at else None
                 ),
             )
+            _persist_domain_funnel()
             history.record_completion(
                 scan_id=scan_id,
                 # job.status stays the enum-constrained ScanStatus.COMPLETED
@@ -720,6 +779,7 @@ class ScanManager:
         except asyncio.CancelledError:
             job.status = ScanStatus.CANCELLED
             job.completed_at = datetime.utcnow()
+            _persist_domain_funnel()
             history.record_completion(
                 scan_id=scan_id,
                 status="cancelled",
@@ -734,6 +794,7 @@ class ScanManager:
             logger.error(f"Scan {scan_id} failed: {e}")
             job.status = ScanStatus.FAILED
             job.completed_at = datetime.utcnow()
+            _persist_domain_funnel()
             history.record_completion(
                 scan_id=scan_id,
                 status="failed",
@@ -772,6 +833,77 @@ class ScanManager:
     # used for the standard estimate below.
     DEEP_KEYWORD_PASS_RATE = 0.20
 
+    # Range-estimate multipliers (WP-26) for a channel whose rates are still
+    # assumed (no calibration data): wide, since there is nothing to bound
+    # the guess with yet. Measured channels instead use their rate's
+    # 25th/75th percentile spread - see _channel_cost_range below.
+    ASSUMED_LOW_MULTIPLIER = 0.4
+    ASSUMED_HIGH_MULTIPLIER = 2.5
+    # A measured channel's low/high band is widened to at least this
+    # fraction of the typical cost either side, even if the IQR spread is
+    # narrower - a handful of scans can look falsely tight.
+    MEASURED_BAND_FLOOR = 0.2
+
+    def _measured_rates(self) -> dict:
+        """Calibrated crawl/structured rates (WP-25), or an all-None shape
+        when no ``scan_history_store`` is wired in - every existing
+        ScanManager() construction site, which then falls back to the
+        static assumptions exactly as before WP-25 introduced this."""
+        if self.scan_history_store is None:
+            return {
+                "crawl": {
+                    "keyword_rate": None, "screening_pass_rate": None,
+                    "pages_per_domain": None, "scans": 0,
+                    "spread": {
+                        "keyword_rate": {"p25": None, "p75": None},
+                        "screening_pass_rate": {"p25": None, "p75": None},
+                        "pages_per_domain": {"p25": None, "p75": None},
+                    },
+                },
+                "structured": {
+                    "items_per_source": None, "screening_pass_rate": None,
+                    "scans": 0,
+                    "spread": {
+                        "items_per_source": {"p25": None, "p75": None},
+                        "screening_pass_rate": {"p25": None, "p75": None},
+                    },
+                },
+            }
+        return self.scan_history_store.measured_rates()
+
+    def _channel_cost_range(
+        self, *, is_measured: bool, typical_cost: float,
+        low_screening_calls: int, high_screening_calls: int,
+        low_analysis_calls: int, high_analysis_calls: int,
+        screening_price, analysis_price, screening_input: int, screening_output: int,
+        analysis_input: int, analysis_output: int,
+    ) -> tuple[float, float]:
+        """(low_cost, high_cost) for one channel (WP-26).
+
+        Assumed channels get a wide fixed multiplier band around the typical
+        cost. Measured channels recompute the cost at each rate's 25th/75th
+        percentile, then widen to at least +/-MEASURED_BAND_FLOOR of typical
+        if that band turns out narrower - a few calibration scans can look
+        falsely precise. Either way, low <= typical <= high always holds.
+        """
+        if not is_measured:
+            return (
+                typical_cost * self.ASSUMED_LOW_MULTIPLIER,
+                typical_cost * self.ASSUMED_HIGH_MULTIPLIER,
+            )
+
+        low_cost = (
+            low_screening_calls * screening_price.cost_usd(screening_input, screening_output)
+            + low_analysis_calls * analysis_price.cost_usd(analysis_input, analysis_output)
+        )
+        high_cost = (
+            high_screening_calls * screening_price.cost_usd(screening_input, screening_output)
+            + high_analysis_calls * analysis_price.cost_usd(analysis_input, analysis_output)
+        )
+        floor_low = typical_cost * (1 - self.MEASURED_BAND_FLOOR)
+        floor_high = typical_cost * (1 + self.MEASURED_BAND_FLOOR)
+        return min(low_cost, floor_low), max(high_cost, floor_high)
+
     def estimate_cost(
         self, domains_group: str, deep: bool = False, channels: Optional[list[str]] = None,
     ) -> dict:
@@ -799,6 +931,23 @@ class ScanManager:
         transposition) skip both - real scans skip the keyword gate for them
         entirely (src/core/scanner.py) - and instead assume a flat number of
         items per source, all of which reach screening.
+
+        Calibration (WP-25): once ``scan_history_store`` has enough completed
+        scans, its measured keyword-gate/screening-pass/pages-per-domain/
+        items-per-source rates replace the static assumptions below, per
+        channel and per metric - each number's provenance (measured vs
+        assumed) is recorded in ``assumptions``. ``deep=True`` always keeps
+        the static deep-scan assumptions for the crawl channel: scan_domains
+        history doesn't distinguish deep from standard runs, and deep crawls
+        far more pages per domain, so blending the two would be misleading.
+        Structured channels are unaffected by ``deep`` (it only changes
+        crawl behavior - see ``_with_deep_scan_defaults``), so their measured
+        rates still apply.
+
+        Range estimates (WP-26): every number returned also has a low/high
+        counterpart (``estimated_cost_low_usd``/``estimated_cost_high_usd``
+        overall, ``cost_low_usd``/``cost_high_usd`` per channel) - see
+        ``_channel_cost_range``.
         """
         domains = self._overlay_domains(self.config.get_enabled_domains(domains_group))
         if channels is not None:
@@ -806,16 +955,16 @@ class ScanManager:
         settings = self.config.settings
 
         max_pages_per_domain = settings.crawl.max_pages_per_domain
-        keyword_pass_rate = 0.10
+        static_keyword_pass_rate = 0.10
         if deep:
             # Reuse _with_deep_scan_defaults as the single source of truth for
             # the deep-scan max_pages value instead of duplicating it here.
             max_pages_per_domain = self._with_deep_scan_defaults({})["max_pages"]
-            keyword_pass_rate = self.DEEP_KEYWORD_PASS_RATE
+            static_keyword_pass_rate = self.DEEP_KEYWORD_PASS_RATE
 
-        screening_pass_rate = 0.50
+        static_screening_pass_rate = 0.50
         est = self._pricing.estimator
-        structured_items_per_source = est.get("structured_items_per_source", 40)
+        static_structured_items_per_source = est.get("structured_items_per_source", 40)
         screening_input = est.get("screening_input", 2000)
         screening_output = est.get("screening_output", 50)
         analysis_input = est.get("analysis_input", 20000)
@@ -826,6 +975,10 @@ class ScanManager:
         screening_price = self._pricing.pricing_for(settings.analysis.screening_model)
         analysis_price = self._pricing.pricing_for(settings.analysis.analysis_model)
 
+        measured = self._measured_rates()
+        crawl_measured = measured["crawl"]
+        structured_measured = measured["structured"]
+
         channel_domains: dict[str, list[dict]] = {}
         for d in domains:
             channel_domains.setdefault(self._domain_channel(d), []).append(d)
@@ -835,29 +988,145 @@ class ScanManager:
         total_keyword_passes = 0
         total_screening_calls = 0
         total_analysis_calls = 0
-        total_raw_cost = 0.0
+        total_typical_cost = 0.0
+        total_low_cost = 0.0
+        total_high_cost = 0.0
+        assumptions: list[str] = []
 
         for channel_name, group in channel_domains.items():
             count = len(group)
-            if channel_name == "crawl":
-                est_pages_per_domain = max_pages_per_domain // 2
+            is_crawl = channel_name == "crawl"
+
+            if is_crawl:
+                # deep=True bypasses measured crawl rates entirely - see the
+                # docstring's Calibration paragraph.
+                use_measured_pages = not deep and crawl_measured["pages_per_domain"] is not None
+                if use_measured_pages:
+                    est_pages_per_domain = crawl_measured["pages_per_domain"]
+                    assumptions.append(
+                        f"crawl: {est_pages_per_domain:.0f} pages/domain measured "
+                        f"across {crawl_measured['scans']} scans"
+                    )
+                else:
+                    est_pages_per_domain = max_pages_per_domain // 2
+                    assumptions.append(
+                        f"crawl: {max_pages_per_domain} max pages/domain configured, "
+                        f"{est_pages_per_domain} assumed crawled (half of max)"
+                    )
                 items_or_pages = count * est_pages_per_domain
-                keyword_passes = int(items_or_pages * keyword_pass_rate)
+
+                keyword_measured = not deep and crawl_measured["keyword_rate"] is not None
+                if keyword_measured:
+                    keyword_rate = crawl_measured["keyword_rate"]
+                    assumptions.append(
+                        f"crawl: keyword gate: {keyword_rate:.1%} measured across "
+                        f"{crawl_measured['scans']} scans"
+                    )
+                else:
+                    keyword_rate = static_keyword_pass_rate
+                    assumptions.append(
+                        f"crawl: {keyword_rate:.0%} of crawled pages assumed to pass "
+                        "the keyword gate (assumed - no scan history yet)"
+                    )
+                keyword_passes = int(items_or_pages * keyword_rate)
                 screening_calls = keyword_passes
+
+                screening_measured = (
+                    not deep and crawl_measured["screening_pass_rate"] is not None
+                )
+                if screening_measured:
+                    channel_screening_pass_rate = crawl_measured["screening_pass_rate"]
+                    assumptions.append(
+                        f"crawl: screening pass rate: {channel_screening_pass_rate:.1%} "
+                        f"measured across {crawl_measured['scans']} scans"
+                    )
+                else:
+                    channel_screening_pass_rate = static_screening_pass_rate
+                    assumptions.append(
+                        f"crawl: {channel_screening_pass_rate:.0%} of screened items "
+                        "assumed to reach analysis (assumed - no scan history yet)"
+                    )
+                analysis_calls = int(screening_calls * channel_screening_pass_rate)
+
+                is_range_measured = keyword_measured and screening_measured
+                spread = crawl_measured["spread"]
+                if is_range_measured:
+                    kw_low, kw_high = spread["keyword_rate"]["p25"], spread["keyword_rate"]["p75"]
+                    scr_low = spread["screening_pass_rate"]["p25"]
+                    scr_high = spread["screening_pass_rate"]["p75"]
+                    low_screening_calls = int(items_or_pages * kw_low)
+                    high_screening_calls = int(items_or_pages * kw_high)
+                    low_analysis_calls = int(low_screening_calls * scr_low)
+                    high_analysis_calls = int(high_screening_calls * scr_high)
+                else:
+                    low_screening_calls = high_screening_calls = 0
+                    low_analysis_calls = high_analysis_calls = 0
             else:
                 # Structured sources skip the crawl page model and the
                 # keyword gate entirely (scanner.py sets is_relevant=True
                 # unconditionally for them) - every assumed item reaches
-                # screening.
-                items_or_pages = count * structured_items_per_source
+                # screening. Every structured channel (law_apis,
+                # transposition) shares one calibration bucket.
+                items_measured = structured_measured["items_per_source"] is not None
+                if items_measured:
+                    items_per_source = structured_measured["items_per_source"]
+                    assumptions.append(
+                        f"structured sources: {items_per_source:.0f} items/source "
+                        f"measured across {structured_measured['scans']} scans"
+                    )
+                else:
+                    items_per_source = static_structured_items_per_source
+                    assumptions.append(
+                        f"structured sources: {items_per_source} items each "
+                        "(assumed - no scan history yet)"
+                    )
+                items_or_pages = count * items_per_source
                 keyword_passes = items_or_pages
                 screening_calls = items_or_pages
 
-            analysis_calls = int(screening_calls * screening_pass_rate)
+                screening_measured = structured_measured["screening_pass_rate"] is not None
+                if screening_measured:
+                    channel_screening_pass_rate = structured_measured["screening_pass_rate"]
+                    assumptions.append(
+                        f"structured sources: screening pass rate: "
+                        f"{channel_screening_pass_rate:.1%} measured across "
+                        f"{structured_measured['scans']} scans"
+                    )
+                else:
+                    channel_screening_pass_rate = static_screening_pass_rate
+                    assumptions.append(
+                        f"structured sources: {channel_screening_pass_rate:.0%} of "
+                        "screened items assumed to reach analysis "
+                        "(assumed - no scan history yet)"
+                    )
+                analysis_calls = int(screening_calls * channel_screening_pass_rate)
 
-            raw_cost = (
+                is_range_measured = items_measured and screening_measured
+                spread = structured_measured["spread"]
+                if is_range_measured:
+                    scr_low = spread["screening_pass_rate"]["p25"]
+                    scr_high = spread["screening_pass_rate"]["p75"]
+                    # Only the *rate* percentiles feed the band (the item
+                    # count itself stays fixed at its typical value across
+                    # low/typical/high - see the docstring).
+                    low_screening_calls = high_screening_calls = screening_calls
+                    low_analysis_calls = int(screening_calls * scr_low)
+                    high_analysis_calls = int(screening_calls * scr_high)
+                else:
+                    low_screening_calls = high_screening_calls = 0
+                    low_analysis_calls = high_analysis_calls = 0
+
+            typical_cost = (
                 screening_calls * screening_price.cost_usd(screening_input, screening_output)
                 + analysis_calls * analysis_price.cost_usd(analysis_input, analysis_output)
+            )
+            low_cost, high_cost = self._channel_cost_range(
+                is_measured=is_range_measured, typical_cost=typical_cost,
+                low_screening_calls=low_screening_calls, high_screening_calls=high_screening_calls,
+                low_analysis_calls=low_analysis_calls, high_analysis_calls=high_analysis_calls,
+                screening_price=screening_price, analysis_price=analysis_price,
+                screening_input=screening_input, screening_output=screening_output,
+                analysis_input=analysis_input, analysis_output=analysis_output,
             )
 
             channels_out[channel_name] = {
@@ -865,32 +1134,28 @@ class ScanManager:
                 "estimated_items_or_pages": items_or_pages,
                 "screening_calls": screening_calls,
                 "analysis_calls": analysis_calls,
-                "cost_usd": round(raw_cost, 2),
+                "cost_usd": round(typical_cost, 2),
+                "cost_low_usd": round(low_cost, 2),
+                "cost_high_usd": round(high_cost, 2),
             }
 
             total_pages += items_or_pages
             total_keyword_passes += keyword_passes
             total_screening_calls += screening_calls
             total_analysis_calls += analysis_calls
-            total_raw_cost += raw_cost
+            total_typical_cost += typical_cost
+            total_low_cost += low_cost
+            total_high_cost += high_cost
 
         # Auditor: a single flat post-scan call, unconditional in this
         # estimate (real scans skip it only when skip_llm/no api key/no
         # policies found - see _run_scan) - priced at the model the
         # auditor actually calls (Auditor's own default, not the
         # cost-level-selected analysis model, since Auditor doesn't
-        # currently read the cost level).
+        # currently read the cost level). Added flat to typical/low/high
+        # alike - it doesn't vary with calibration.
         auditor_price = self._pricing.pricing_for(DEFAULT_ANALYSIS_MODEL)
         auditor_raw_cost = auditor_price.cost_usd(auditor_input, auditor_output)
-
-        assumptions = [
-            f"crawl: {max_pages_per_domain} max pages/domain configured, "
-            f"{max_pages_per_domain // 2} assumed crawled (half of max)",
-            f"crawl: {keyword_pass_rate:.0%} of crawled pages assumed to pass the keyword gate",
-            f"{screening_pass_rate:.0%} of screened items assumed to reach analysis",
-            f"structured sources: {structured_items_per_source} items each "
-            "(assumed - no scan history yet)",
-        ]
 
         return {
             "domain_count": len(domains),
@@ -898,7 +1163,9 @@ class ScanManager:
             "estimated_keyword_passes": total_keyword_passes,
             "estimated_screening_calls": total_screening_calls,
             "estimated_analysis_calls": total_analysis_calls,
-            "estimated_cost_usd": round(total_raw_cost + auditor_raw_cost, 2),
+            "estimated_cost_usd": round(total_typical_cost + auditor_raw_cost, 2),
+            "estimated_cost_low_usd": round(total_low_cost + auditor_raw_cost, 2),
+            "estimated_cost_high_usd": round(total_high_cost + auditor_raw_cost, 2),
             "channels": channels_out,
             "auditor_cost_usd": round(auditor_raw_cost, 2),
             "assumptions": assumptions,

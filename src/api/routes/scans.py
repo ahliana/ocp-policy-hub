@@ -176,37 +176,75 @@ def get_scan(
     scan_id: str,
     request: Request,
     manager: ScanManager = Depends(get_scan_manager),
+    history: ScanHistoryStore = Depends(get_scan_history_store),
 ):
     """Get detailed scan status including per-domain progress.
 
     Admin-only: same reasoning as GET /api/scans above - per-domain
     progress includes unreviewed/rejected policies and cost/token data.
+
+    The in-memory path (``manager.jobs``) is primary and returns the full
+    live shape. Once a completed scan's job has left process memory (a
+    restart, or any future eviction), this falls back to the persisted
+    ``scans``/``scan_domains`` rows (WP-23) - a completed scan's funnel
+    must survive restart. The DB-fallback ``progress.domains`` entries carry
+    fewer fields than the live ``DomainProgress`` shape (no domain_name,
+    status, or the finer-grained filter-reason counters) since scan_domains
+    only stores what the funnel/calibration feature needs.
     """
     if not request_is_admin(request):
         raise HTTPException(status_code=403, detail="Administrator access required")
     job = manager.jobs.get(scan_id)
-    if not job:
+    if job:
+        policies = manager.get_policies(scan_id)
+        return {
+            "scan_id": job.scan_id,
+            "status": job.status.value,
+            "started_at": job.started_at,
+            "completed_at": job.completed_at,
+            "domain_count": job.domain_count,
+            "policy_count": job.policy_count,
+            "progress": {
+                "total": job.progress.total_domains,
+                "completed": job.progress.completed_domains,
+                "running": job.progress.running_domains,
+                "domains": [dp.model_dump() for dp in job.progress.domains],
+            },
+            "policies": [p.model_dump(mode="json") for p in policies],
+            "cost": job.cost.model_dump() if job.cost else None,
+            "audit_advisory": job.audit_advisory,
+            "budget_reached": job.budget_reached,
+        }
+
+    row = history.get(scan_id)
+    if not row:
         raise HTTPException(status_code=404, detail=f"Scan '{scan_id}' not found")
 
-    policies = manager.get_policies(scan_id)
-
+    domain_rows = history.domains_for_scan(scan_id)
     return {
-        "scan_id": job.scan_id,
-        "status": job.status.value,
-        "started_at": job.started_at,
-        "completed_at": job.completed_at,
-        "domain_count": job.domain_count,
-        "policy_count": job.policy_count,
+        "scan_id": row["scan_id"],
+        "status": row["status"],
+        "started_at": row["started_at"],
+        "completed_at": row["completed_at"],
+        "domain_count": row["domains_scanned"],
+        "policy_count": row["policies_found"],
         "progress": {
-            "total": job.progress.total_domains,
-            "completed": job.progress.completed_domains,
-            "running": job.progress.running_domains,
-            "domains": [dp.model_dump() for dp in job.progress.domains],
+            "total": row["domains_scanned"],
+            "completed": len(domain_rows),
+            "running": 0,
+            "domains": domain_rows,
         },
-        "policies": [p.model_dump(mode="json") for p in policies],
-        "cost": job.cost.model_dump() if job.cost else None,
-        "audit_advisory": job.audit_advisory,
-        "budget_reached": job.budget_reached,
+        "policies": [],
+        "cost": (
+            {
+                "input_tokens": row["input_tokens"],
+                "output_tokens": row["output_tokens"],
+                "total_usd": row["cost_usd"],
+            }
+            if row["cost_usd"] is not None else None
+        ),
+        "audit_advisory": None,
+        "budget_reached": row["status"] == "completed_budget_reached",
     }
 
 

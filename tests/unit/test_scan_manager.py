@@ -1,5 +1,7 @@
 """Tests for ScanManager domain-default handling."""
 
+import sqlite3
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -336,9 +338,9 @@ class TestEstimateCost:
             manager.estimate_cost("bogus")
 
     def test_valid_scope_returns_expected_shape(self):
-        """WP-21: every pre-existing key is kept (frontend depends on them)
-        and three new ones are added: channels, auditor_cost_usd,
-        assumptions."""
+        """WP-21/WP-26: every pre-existing key is kept (frontend depends on
+        them); WP-21 adds channels/auditor_cost_usd/assumptions, WP-26 adds
+        the estimated_cost_low_usd/estimated_cost_high_usd range."""
         domains = [{"id": f"d{i}", "name": f"D{i}"} for i in range(5)]
         manager = _manager_with_config(get_enabled_domains_return=domains)
 
@@ -352,12 +354,16 @@ class TestEstimateCost:
             "estimated_screening_calls",
             "estimated_analysis_calls",
             "estimated_cost_usd",
+            "estimated_cost_low_usd",
+            "estimated_cost_high_usd",
             "channels",
             "auditor_cost_usd",
             "assumptions",
         }
         assert result["estimated_cost_usd"] > 0
         assert result["auditor_cost_usd"] > 0
+        assert result["estimated_cost_low_usd"] <= result["estimated_cost_usd"]
+        assert result["estimated_cost_usd"] <= result["estimated_cost_high_usd"]
         assert isinstance(result["assumptions"], list)
         assert all(isinstance(a, str) for a in result["assumptions"])
 
@@ -582,7 +588,10 @@ class TestEstimateCostChannels:
             assert key in result
 
     def test_assumptions_mentions_structured_items_assumption(self):
-        domains = [{"id": "d1", "name": "D1"}]
+        # WP-25: assumption strings are only emitted per channel actually
+        # present in the scope, so this needs a structured-source domain
+        # (a pure-crawl scope has nothing structured to caveat).
+        domains = [{"id": "a1", "name": "A1", "source_type": "legiscan"}]
         manager = _manager_with_config(get_enabled_domains_return=domains)
 
         result = manager.estimate_cost("quick")
@@ -1005,3 +1014,390 @@ class TestBudgetStop:
         assert job.cost.total_usd == 20.0
         row = ScanHistoryStore(data_dir=str(data_dir)).list()[0]
         assert row["status"] == "completed"
+
+
+def _dp(domain_id: str, **overrides) -> DomainProgress:
+    defaults = dict(domain_id=domain_id, domain_name=domain_id)
+    defaults.update(overrides)
+    return DomainProgress(**defaults)
+
+
+@pytest.mark.medium
+class TestDomainFunnelPersistence:
+    """WP-23: ScanManager persists each domain's final funnel to
+    scan_domains at scan end (_persist_domain_funnel(), called alongside
+    every record_completion() in _run_scan)."""
+
+    def _manager(self, tmp_path, monkeypatch, *, progress=None):
+        config = _minimal_config(tmp_path / "config")
+        data_dir = tmp_path / "data"
+        manager = ScanManager(
+            config=config, broadcaster=EventBroadcaster(), data_dir=str(data_dir),
+        )
+
+        mock_scanner = MagicMock()
+        mock_scanner.scan = AsyncMock(return_value=[])
+        mock_scanner.progress = progress or DomainProgress(
+            domain_id="test_gov", domain_name="Test Gov", status=DomainScanStatus.COMPLETED,
+            pages_crawled=42, keywords_matched=7, filtered_keywords=3,
+            filtered_screening=2, llm_skipped=1, policies_found=1, errors=0,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.DomainScanner",
+            lambda **kwargs: mock_scanner,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.AsyncCrawler",
+            lambda **kwargs: MagicMock(close=AsyncMock()),
+        )
+        return manager, data_dir
+
+    @pytest.mark.asyncio
+    async def test_completed_scan_writes_funnel_row(self, tmp_path, monkeypatch):
+        manager, data_dir = self._manager(tmp_path, monkeypatch)
+
+        job = await manager.start_scan(domains_group="quick", skip_llm=True)
+        await manager._tasks[job.scan_id]
+
+        rows = ScanHistoryStore(data_dir=str(data_dir)).domains_for_scan(job.scan_id)
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["domain_id"] == "test_gov"
+        assert row["channel"] == "crawl"
+        assert row["pages_crawled"] == 42
+        assert row["keywords_matched"] == 7
+        assert row["filtered_keywords"] == 3
+        assert row["filtered_screening"] == 2
+        assert row["llm_skipped"] == 1
+        assert row["policies_found"] == 1
+        assert row["errors"] == 0
+
+    @pytest.mark.asyncio
+    async def test_structured_domain_records_its_channel(self, tmp_path, monkeypatch):
+        config = _minimal_config(tmp_path / "config")
+        structured_domain = dict(
+            config.get_enabled_domains("quick")[0], id="legiscan_dom", source_type="legiscan",
+        )
+        monkeypatch.setattr(
+            config, "get_enabled_domains", lambda group: [structured_domain],
+        )
+        data_dir = tmp_path / "data"
+        manager = ScanManager(
+            config=config, broadcaster=EventBroadcaster(), data_dir=str(data_dir),
+        )
+        mock_scanner = MagicMock()
+        mock_scanner.scan = AsyncMock(return_value=[])
+        mock_scanner.progress = DomainProgress(
+            domain_id="legiscan_dom", domain_name="Legiscan", status=DomainScanStatus.COMPLETED,
+            pages_crawled=40,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.DomainScanner",
+            lambda **kwargs: mock_scanner,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.AsyncCrawler",
+            lambda **kwargs: MagicMock(close=AsyncMock()),
+        )
+
+        job = await manager.start_scan(
+            domains_group="quick", skip_llm=True, channels=["crawl", "law_apis"],
+        )
+        await manager._tasks[job.scan_id]
+
+        row = ScanHistoryStore(data_dir=str(data_dir)).domains_for_scan(job.scan_id)[0]
+        assert row["channel"] == "law_apis"
+
+    @pytest.mark.asyncio
+    async def test_failed_scan_still_persists_funnel(self, tmp_path, monkeypatch):
+        manager, data_dir = self._manager(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            "src.core.cache.URLCache.save",
+            MagicMock(side_effect=RuntimeError("disk full")),
+        )
+
+        job = await manager.start_scan(domains_group="quick", skip_llm=True)
+        await manager._tasks[job.scan_id]
+
+        rows = ScanHistoryStore(data_dir=str(data_dir)).domains_for_scan(job.scan_id)
+        assert len(rows) == 1
+
+    @pytest.mark.asyncio
+    async def test_funnel_persistence_failure_does_not_block_scan_completion(
+        self, tmp_path, monkeypatch,
+    ):
+        manager, data_dir = self._manager(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            "src.storage.scan_history.ScanHistoryStore.record_domains",
+            MagicMock(side_effect=sqlite3.OperationalError("database is locked")),
+        )
+
+        job = await manager.start_scan(domains_group="quick", skip_llm=True)
+        await manager._tasks[job.scan_id]
+
+        assert manager.jobs[job.scan_id].status.value == "completed"
+        row = ScanHistoryStore(data_dir=str(data_dir)).list()[0]
+        assert row["status"] == "completed"
+
+
+@pytest.mark.medium
+class TestEstimateStoredAtScanStart:
+    """WP-24: start_scan() computes the estimate for its exact
+    scope/channels/deep and passes the trio into record_start()."""
+
+    def _manager(self, tmp_path, monkeypatch):
+        config = _minimal_config(tmp_path / "config")
+        data_dir = tmp_path / "data"
+        manager = ScanManager(
+            config=config, broadcaster=EventBroadcaster(), data_dir=str(data_dir),
+        )
+        mock_scanner = MagicMock()
+        mock_scanner.scan = AsyncMock(return_value=[])
+        mock_scanner.progress = DomainProgress(
+            domain_id="test_gov", domain_name="Test Gov", status=DomainScanStatus.COMPLETED,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.DomainScanner",
+            lambda **kwargs: mock_scanner,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.AsyncCrawler",
+            lambda **kwargs: MagicMock(close=AsyncMock()),
+        )
+        return manager, data_dir
+
+    @pytest.mark.asyncio
+    async def test_estimate_trio_persisted_at_start(self, tmp_path, monkeypatch):
+        manager, data_dir = self._manager(tmp_path, monkeypatch)
+
+        job = await manager.start_scan(domains_group="quick", skip_llm=True)
+        await manager._tasks[job.scan_id]
+
+        row = ScanHistoryStore(data_dir=str(data_dir)).get(job.scan_id)
+        assert row["estimated_cost_usd"] is not None
+        assert row["estimated_low_usd"] is not None
+        assert row["estimated_high_usd"] is not None
+        assert row["estimated_low_usd"] <= row["estimated_cost_usd"] <= row["estimated_high_usd"]
+
+    @pytest.mark.asyncio
+    async def test_estimate_matches_a_direct_estimate_cost_call(self, tmp_path, monkeypatch):
+        manager, data_dir = self._manager(tmp_path, monkeypatch)
+        expected = manager.estimate_cost("quick", deep=False, channels=["crawl"])
+
+        job = await manager.start_scan(domains_group="quick", skip_llm=True)
+        await manager._tasks[job.scan_id]
+
+        row = ScanHistoryStore(data_dir=str(data_dir)).get(job.scan_id)
+        assert row["estimated_cost_usd"] == expected["estimated_cost_usd"]
+        assert row["estimated_low_usd"] == expected["estimated_cost_low_usd"]
+        assert row["estimated_high_usd"] == expected["estimated_cost_high_usd"]
+
+    @pytest.mark.asyncio
+    async def test_estimation_failure_stores_nulls_and_does_not_block_scan(
+        self, tmp_path, monkeypatch,
+    ):
+        manager, data_dir = self._manager(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            manager, "estimate_cost",
+            MagicMock(side_effect=ValueError("No pricing entries in config/pricing.yaml")),
+        )
+
+        job = await manager.start_scan(domains_group="quick", skip_llm=True)
+        await manager._tasks[job.scan_id]
+
+        assert manager.jobs[job.scan_id].status.value == "completed"
+        row = ScanHistoryStore(data_dir=str(data_dir)).get(job.scan_id)
+        assert row["estimated_cost_usd"] is None
+        assert row["estimated_low_usd"] is None
+        assert row["estimated_high_usd"] is None
+
+
+@pytest.mark.medium
+class TestEstimateCostMeasuredRates:
+    """WP-25: estimate_cost() switches to measured rates once
+    ScanHistoryStore.measured_rates() clears the 2-scans/3-rows threshold,
+    and tags every number's provenance in ``assumptions``."""
+
+    @staticmethod
+    def _seed_crawl_history(history: ScanHistoryStore) -> None:
+        # Same fixture (and independently-verified numbers) as
+        # TestMeasuredRates in test_scan_history_store.py: 3 completed
+        # scans, one crawl domain row each.
+        base = datetime(2026, 1, 1)
+        rows = [("s1", 100, 10, 2, 1), ("s2", 200, 30, 5, 0), ("s3", 50, 2, 0, 0)]
+        for scan_id, pages, kw, filtered_screening, llm_skipped in rows:
+            history.record_start(
+                scan_id=scan_id, domain_group="quick", mode="standard",
+                channels=["crawl"], started_at=base,
+            )
+            history.record_completion(scan_id=scan_id, status="completed", completed_at=base)
+            history.record_domains(
+                scan_id,
+                [(
+                    _dp(
+                        scan_id, pages_crawled=pages, keywords_matched=kw,
+                        filtered_screening=filtered_screening, llm_skipped=llm_skipped,
+                    ),
+                    "crawl",
+                )],
+                completed_at=base,
+            )
+
+    def test_uses_measured_rates_once_threshold_met(self, tmp_path):
+        history = ScanHistoryStore(data_dir=str(tmp_path))
+        self._seed_crawl_history(history)
+        domains = [{"id": "d1", "name": "D1"}]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+        manager.scan_history_store = history
+
+        result = manager.estimate_cost("quick")
+
+        assert any(
+            "keyword gate: 10.0% measured across 3 scans" in a for a in result["assumptions"]
+        )
+        assert any("screening pass rate:" in a and "measured across 3 scans" in a
+                    for a in result["assumptions"])
+
+    def test_falls_back_to_assumed_below_threshold(self, tmp_path):
+        history = ScanHistoryStore(data_dir=str(tmp_path))
+        base = datetime(2026, 1, 1)
+        history.record_start(
+            scan_id="s1", domain_group="quick", mode="standard",
+            channels=["crawl"], started_at=base,
+        )
+        history.record_completion(scan_id="s1", status="completed", completed_at=base)
+        history.record_domains(
+            "s1", [(_dp("d1", pages_crawled=100, keywords_matched=10), "crawl")],
+            completed_at=base,
+        )
+        domains = [{"id": "d1", "name": "D1"}]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+        manager.scan_history_store = history
+
+        result = manager.estimate_cost("quick")
+
+        assert any("assumed - no scan history yet" in a for a in result["assumptions"])
+        assert not any("measured across" in a for a in result["assumptions"])
+
+    def test_deep_scan_bypasses_measured_crawl_rates(self, tmp_path):
+        history = ScanHistoryStore(data_dir=str(tmp_path))
+        self._seed_crawl_history(history)
+        domains = [{"id": "d1", "name": "D1"}]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+        manager.scan_history_store = history
+
+        result = manager.estimate_cost("quick", deep=True)
+
+        assert not any("measured across" in a for a in result["assumptions"])
+        assert any("assumed crawled (half of max)" in a for a in result["assumptions"])
+
+    def test_no_store_wired_in_behaves_exactly_as_before(self, tmp_path):
+        # The default every existing ScanManager() call site relies on:
+        # scan_history_store=None means "no calibration data available".
+        history = ScanHistoryStore(data_dir=str(tmp_path))
+        self._seed_crawl_history(history)
+        domains = [{"id": "d1", "name": "D1"}]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+        assert manager.scan_history_store is None
+
+        result = manager.estimate_cost("quick")
+
+        assert not any("measured across" in a for a in result["assumptions"])
+
+
+@pytest.mark.small
+class TestEstimateCostRange:
+    """WP-26: estimate_cost() gains estimated_cost_low_usd/
+    estimated_cost_high_usd (and each channel gains cost_low_usd/
+    cost_high_usd) alongside the existing (typical) estimated_cost_usd."""
+
+    def test_assumed_band_uses_fixed_multipliers(self):
+        domains = [{"id": f"d{i}", "name": f"D{i}"} for i in range(5)]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+
+        result = manager.estimate_cost("quick")
+
+        crawl = result["channels"]["crawl"]
+        assert crawl["cost_low_usd"] == pytest.approx(crawl["cost_usd"] * 0.4, abs=0.01)
+        assert crawl["cost_high_usd"] == pytest.approx(crawl["cost_usd"] * 2.5, abs=0.01)
+        assert result["estimated_cost_low_usd"] == pytest.approx(
+            crawl["cost_low_usd"] + result["auditor_cost_usd"], abs=0.01,
+        )
+        assert result["estimated_cost_high_usd"] == pytest.approx(
+            crawl["cost_high_usd"] + result["auditor_cost_usd"], abs=0.01,
+        )
+
+    def test_channels_gain_low_high_keys(self):
+        domains = (
+            [{"id": "c1", "name": "C1"}]
+            + [{"id": "a1", "name": "A1", "source_type": "legiscan"}]
+        )
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+
+        result = manager.estimate_cost("quick")
+
+        for channel in result["channels"].values():
+            assert "cost_low_usd" in channel
+            assert "cost_high_usd" in channel
+            assert channel["cost_low_usd"] <= channel["cost_usd"] <= channel["cost_high_usd"]
+
+    @pytest.mark.parametrize("deep", [False, True])
+    def test_ordering_invariant_holds(self, deep):
+        domains = (
+            [{"id": f"c{i}", "name": f"C{i}"} for i in range(3)]
+            + [{"id": f"a{i}", "name": f"A{i}", "source_type": "legiscan"} for i in range(2)]
+        )
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+
+        result = manager.estimate_cost("quick", deep=deep)
+
+        assert result["estimated_cost_low_usd"] <= result["estimated_cost_usd"]
+        assert result["estimated_cost_usd"] <= result["estimated_cost_high_usd"]
+        for channel in result["channels"].values():
+            assert channel["cost_low_usd"] <= channel["cost_usd"]
+            assert channel["cost_usd"] <= channel["cost_high_usd"]
+
+    def test_zero_domain_scope_stays_well_ordered(self):
+        manager = _manager_with_config(get_enabled_domains_return=[])
+        result = manager.estimate_cost("quick")
+        assert result["estimated_cost_low_usd"] <= result["estimated_cost_usd"]
+        assert result["estimated_cost_usd"] <= result["estimated_cost_high_usd"]
+
+
+@pytest.mark.medium
+class TestEstimateCostMeasuredRange:
+    """WP-26: a measured channel's low/high band comes from its rate's
+    25th/75th percentile, widened to at least +/-20% of typical if the IQR
+    band is narrower."""
+
+    def test_narrow_iqr_widens_to_the_twenty_percent_floor(self, tmp_path):
+        history = ScanHistoryStore(data_dir=str(tmp_path))
+        base = datetime(2026, 1, 1)
+        # Identical rates across all three scans -> zero-width IQR (p25 ==
+        # median == p75) -> the percentile band alone would be a single
+        # point, so the +/-20% floor must be what actually applies.
+        for scan_id in ("s1", "s2", "s3"):
+            history.record_start(
+                scan_id=scan_id, domain_group="quick", mode="standard",
+                channels=["crawl"], started_at=base,
+            )
+            history.record_completion(scan_id=scan_id, status="completed", completed_at=base)
+            history.record_domains(
+                scan_id,
+                [(
+                    _dp(scan_id, pages_crawled=100, keywords_matched=10,
+                        filtered_screening=0, llm_skipped=0),
+                    "crawl",
+                )],
+                completed_at=base,
+            )
+
+        domains = [{"id": "d1", "name": "D1"}]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+        manager.scan_history_store = history
+
+        result = manager.estimate_cost("quick")
+
+        crawl = result["channels"]["crawl"]
+        assert crawl["cost_low_usd"] == pytest.approx(crawl["cost_usd"] * 0.8, abs=0.01)
+        assert crawl["cost_high_usd"] == pytest.approx(crawl["cost_usd"] * 1.2, abs=0.01)

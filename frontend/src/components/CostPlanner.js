@@ -23,6 +23,30 @@ function selectedValues(event) {
     return Array.from(event.target.selectedOptions).map((option) => option.value);
 }
 
+function formatScanDate(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString();
+}
+
+function formatScanStatus(status) {
+    return status === 'completed_budget_reached' ? 'completed (budget cap reached)' : status;
+}
+
+// Percent (actual - estimate)/estimate, rounded to a whole number. null
+// (rendered as "-") whenever either figure is missing - legacy rows before
+// WP-24 have no estimate on file - or the estimate is zero/negative, which
+// would make the percentage meaningless.
+function estimateDifferencePercent(estimatedUsd, actualUsd) {
+    if (estimatedUsd == null || actualUsd == null || estimatedUsd <= 0) return null;
+    return Math.round(((actualUsd - estimatedUsd) / estimatedUsd) * 100);
+}
+
+function formatDifferencePercent(percent) {
+    if (percent == null) return '-';
+    return percent > 0 ? `+${percent}%` : `${percent}%`;
+}
+
 async function fetchProjection(groups, cadence) {
     const params = new URLSearchParams({ groups: groups.join(','), cadence });
     const response = await fetch(apiUrl(`/api/cost-projection?${params.toString()}`), {
@@ -98,6 +122,9 @@ function CostPlanner() {
     const [projectionB, setProjectionB] = useState(null);
     const [error, setError] = useState('');
     const [copyStatus, setCopyStatus] = useState('');
+    // null = not fetched yet (renders nothing); [] = fetched, no scans yet
+    // (renders the empty-state message).
+    const [recentScans, setRecentScans] = useState(null);
 
     useEffect(() => {
         let isCurrent = true;
@@ -108,6 +135,22 @@ function CostPlanner() {
             })
             .catch(() => {
                 if (isCurrent) setGroupOptions({});
+            });
+        return () => {
+            isCurrent = false;
+        };
+    }, []);
+
+    // Recent scans (WP-24) - estimate vs. actual, most recent 10 runs.
+    useEffect(() => {
+        let isCurrent = true;
+        fetch(apiUrl('/api/scans/history?limit=10'), { headers: adminHeaders() })
+            .then((response) => (response.ok ? response.json() : { scans: [] }))
+            .then((data) => {
+                if (isCurrent) setRecentScans((data && data.scans) || []);
+            })
+            .catch(() => {
+                if (isCurrent) setRecentScans([]);
             });
         return () => {
             isCurrent = false;
@@ -167,6 +210,19 @@ function CostPlanner() {
         if (compareEnabled) list.push({ name: 'Scenario B', projection: projectionB });
         return list;
     }, [projectionA, projectionB, compareEnabled]);
+
+    // Rolling accuracy sentence (WP-24) - only counts rows where both an
+    // estimate and an actual cost are on file; needs at least two to say
+    // anything meaningful.
+    const qualifyingDiffPercents = useMemo(() => (
+        (recentScans || [])
+            .map((scan) => estimateDifferencePercent(scan.estimated_cost_usd, scan.cost_usd))
+            .filter((percent) => percent != null)
+    ), [recentScans]);
+    const accuracySentence = qualifyingDiffPercents.length >= 2
+        ? `Estimates were within ${Math.max(...qualifyingDiffPercents.map(Math.abs))}% of actual `
+            + `cost on the last ${qualifyingDiffPercents.length} scans.`
+        : null;
 
     const handleCopy = async () => {
         const text = buildPlainTextTable(scenarios, cadence);
@@ -299,6 +355,52 @@ function CostPlanner() {
                 Copy as text
             </button>
             {copyStatus && <p role="status">{copyStatus}</p>}
+
+            <div className="recent-scans">
+                <h3 className="recent-scans-heading">Recent scans</h3>
+                {recentScans && recentScans.length === 0 && (
+                    <p className="recent-scans-empty">
+                        No scans recorded yet - the first scheduled scan will appear here.
+                    </p>
+                )}
+                {recentScans && recentScans.length > 0 && (
+                    <>
+                        <div className="admin-table-wrap">
+                            <table className="cost-planner-table recent-scans-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Scope</th>
+                                        <th>Status</th>
+                                        <th>Estimated</th>
+                                        <th>Actual</th>
+                                        <th>Difference</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {recentScans.map((scan, index) => (
+                                        <tr key={scan.scan_id || index}>
+                                            <td>{formatScanDate(scan.started_at)}</td>
+                                            <td>{scan.domain_group}</td>
+                                            <td>{formatScanStatus(scan.status)}</td>
+                                            <td>{formatUsd(scan.estimated_cost_usd)}</td>
+                                            <td>{formatUsd(scan.cost_usd)}</td>
+                                            <td>
+                                                {formatDifferencePercent(
+                                                    estimateDifferencePercent(scan.estimated_cost_usd, scan.cost_usd),
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        {accuracySentence && (
+                            <p className="recent-scans-accuracy">{accuracySentence}</p>
+                        )}
+                    </>
+                )}
+            </div>
         </div>
     );
 }

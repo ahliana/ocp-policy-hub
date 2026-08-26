@@ -60,7 +60,9 @@ function AgentPanel({
     const { wsRef, isChatRunning, setIsChatRunning } = useAgentSocket({
         onNotice: pushNotice,
     });
-    const { costStatus, costEstimateText, domainCount } = useCostEstimate({
+    const {
+        costStatus, costEstimateText, costEstimate, domainCount,
+    } = useCostEstimate({
         selectedRegions,
         mode,
     });
@@ -189,6 +191,7 @@ function AgentPanel({
                             onChannelsChange={setChannels}
                             costStatus={costStatus}
                             costEstimateText={costEstimateText}
+                            costEstimate={costEstimate}
                             sourceCount={domainCount}
                             isBusy={isBusy}
                             hasApiKey={hasApiKey}

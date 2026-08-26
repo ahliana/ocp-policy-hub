@@ -280,3 +280,17 @@ class TestMonthSpend:
         )
         conn.commit()
         assert store.month_spend("quick", datetime(2026, 1, 31)) == 0.0
+
+    @pytest.mark.medium
+    def test_counts_budget_capped_scans_toward_the_ceiling(self, store):
+        """A scan the mid-scan budget stop truncated (WP-22b) still spent real
+        money this month - if its row escaped month_spend, the very spend that
+        hit the cap would not count toward the ceiling it hit."""
+        conn = store._conn
+        conn.execute(
+            "INSERT INTO scans (scan_id, domain_group, status, completed_at, cost_usd) "
+            "VALUES (?, ?, 'completed_budget_reached', ?, ?)",
+            ("s1", "quick", "2026-01-05T00:00:00", 49.9),
+        )
+        conn.commit()
+        assert store.month_spend("quick", datetime(2026, 1, 31)) == pytest.approx(49.9)

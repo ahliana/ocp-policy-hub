@@ -57,10 +57,24 @@ function formatCostEstimateText(costStatus, costEstimate) {
         return 'Estimate unavailable';
     }
     if (costStatus === 'ready' && costEstimate) {
-        const cost = Number(costEstimate.estimated_cost_usd || 0).toFixed(2);
         const targetLabel = costEstimate.target_count > 1 ? `${costEstimate.target_count} targets` : '1 target';
         const filterNote = costEstimate.has_filters ? ', filters not included' : '';
-        return `$${cost} (${targetLabel}${filterNote})`;
+        const suffix = `(${targetLabel}${filterNote})`;
+
+        // WP-26: the backend now sends a low/high band alongside the
+        // typical (point) figure. Show the band when it's present and
+        // actually spans a range; a legacy/degenerate response (band
+        // fields absent, or low === high) falls back to the plain
+        // point-estimate text so this stays backward compatible.
+        const low = costEstimate.estimated_cost_low_usd;
+        const high = costEstimate.estimated_cost_high_usd;
+        const typical = Number(costEstimate.estimated_cost_usd || 0).toFixed(2);
+        if (low != null && high != null && Number(low) !== Number(high)) {
+            const lowText = Number(low).toFixed(2);
+            const highText = Number(high).toFixed(2);
+            return `$${lowText}-$${highText} (typically ~$${typical}) ${suffix}`;
+        }
+        return `$${typical} ${suffix}`;
     }
     // Truly-unknown fallback - every named costStatus has its own message above.
     return 'No cost estimate';
@@ -148,6 +162,10 @@ function useCostEstimate({ selectedRegions, mode }) {
         // for the scan-scope summary line (WP-6) once it's ready. null while
         // loading/idle/erroring, so callers know to fall back.
         domainCount: costStatus === 'ready' && costEstimate ? costEstimate.target_count : null,
+        // The raw /api/cost-estimate response (WP-26) - carries the
+        // per-channel breakdown and assumptions list that costEstimateText
+        // doesn't summarize. null outside the ready state.
+        costEstimate: costStatus === 'ready' ? costEstimate : null,
     };
 }
 

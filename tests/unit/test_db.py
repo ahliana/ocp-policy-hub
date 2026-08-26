@@ -533,3 +533,100 @@ class TestJurisdictionsMirror:
         ).fetchone()
         assert row == ("European Union", "supranational")
         conn.close()
+
+
+@pytest.mark.medium
+class TestScanDomainsSchema:
+    """The scan_domains table (WP-23) - one row per domain per scan."""
+
+    def test_table_created_on_connect(self, tmp_path):
+        conn = storage_db.connect(tmp_path)
+        conn.execute(
+            "INSERT INTO scan_domains (scan_id, domain_id, channel, pages_crawled, "
+            "keywords_matched, filtered_keywords, filtered_screening, llm_skipped, "
+            "policies_found, errors, completed_at) VALUES "
+            "('s1', 'd1', 'crawl', 100, 10, 5, 2, 1, 3, 0, '2026-01-01T00:00:00')"
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT scan_id, domain_id, channel, pages_crawled FROM scan_domains"
+        ).fetchone()
+        assert row == ("s1", "d1", "crawl", 100)
+        conn.close()
+
+    def test_primary_key_is_scan_id_and_domain_id(self, tmp_path):
+        conn = storage_db.connect(tmp_path)
+        conn.execute(
+            "INSERT INTO scan_domains (scan_id, domain_id, channel) "
+            "VALUES ('s1', 'd1', 'crawl')"
+        )
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO scan_domains (scan_id, domain_id, channel) "
+                "VALUES ('s1', 'd1', 'law_apis')"
+            )
+        conn.close()
+
+    def test_reconnect_does_not_duplicate_or_error(self, tmp_path):
+        conn1 = storage_db.connect(tmp_path)
+        conn1.execute(
+            "INSERT INTO scan_domains (scan_id, domain_id, channel) "
+            "VALUES ('s1', 'd1', 'crawl')"
+        )
+        conn1.commit()
+        conn1.close()
+
+        conn2 = storage_db.connect(tmp_path)  # migration/schema setup re-runs
+        count = conn2.execute("SELECT COUNT(*) FROM scan_domains").fetchone()[0]
+        assert count == 1
+        conn2.close()
+
+
+@pytest.mark.medium
+class TestScansEstimateColumnsMigration:
+    """The estimated_cost_usd/estimated_low_usd/estimated_high_usd columns
+    (WP-24) on the ``scans`` table: present on a fresh db via CREATE TABLE,
+    and guard-added in place via ALTER TABLE for a pre-existing db that
+    predates them."""
+
+    def test_fresh_db_has_estimate_columns(self, tmp_path):
+        conn = storage_db.connect(tmp_path)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(scans)")}
+        assert {"estimated_cost_usd", "estimated_low_usd", "estimated_high_usd"} <= columns
+        conn.close()
+
+    def test_pre_existing_scans_table_gets_columns_added(self, tmp_path):
+        # Simulate a database created before WP-24: a scans table with the
+        # old column set only, no estimate columns.
+        db_path = tmp_path / storage_db.DB_FILENAME
+        legacy = sqlite3.connect(db_path)
+        legacy.execute(
+            "CREATE TABLE scans (scan_id TEXT PRIMARY KEY, domain_group TEXT, "
+            "mode TEXT, channels TEXT, status TEXT, started_at TEXT, "
+            "completed_at TEXT, domains_scanned INTEGER, policies_found INTEGER, "
+            "cost_usd REAL, input_tokens INTEGER, output_tokens INTEGER)"
+        )
+        legacy.execute(
+            "INSERT INTO scans (scan_id, domain_group, status) VALUES ('s1', 'quick', 'completed')"
+        )
+        legacy.commit()
+        legacy.close()
+
+        conn = storage_db.connect(tmp_path)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(scans)")}
+        assert {"estimated_cost_usd", "estimated_low_usd", "estimated_high_usd"} <= columns
+        # The pre-existing row survives the ALTER, with the new columns NULL.
+        row = conn.execute(
+            "SELECT scan_id, estimated_cost_usd FROM scans WHERE scan_id = 's1'"
+        ).fetchone()
+        assert row == ("s1", None)
+        conn.close()
+
+    def test_migration_is_idempotent_across_reconnects(self, tmp_path):
+        storage_db.connect(tmp_path).close()
+        # Second connect() must not raise "duplicate column name".
+        conn = storage_db.connect(tmp_path)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(scans)")]
+        assert columns.count("estimated_cost_usd") == 1
+        conn.close()
