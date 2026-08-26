@@ -78,6 +78,11 @@ async def fire_schedule(
         )
         return False
 
+    # Mid-scan budget stop (WP-22b): what's left of the monthly ceiling,
+    # computed BEFORE firing, becomes the scan's own budget_usd cap so it
+    # can stop itself partway through rather than only being blocked
+    # pre-flight on a future tick. None (no ceiling configured) means no cap.
+    budget_usd = None
     ceiling = schedule.get("monthly_ceiling_usd")
     if ceiling is not None:
         spend = store.month_spend(domains, now)
@@ -90,6 +95,7 @@ async def fire_schedule(
                 reason=reason,
             )
             return False
+        budget_usd = ceiling - spend
 
     if schedule.get("paused_reason"):
         store.update(schedule["id"], paused_reason=None)
@@ -101,6 +107,7 @@ async def fire_schedule(
         deep=bool(schedule.get("deep")),
         channels=schedule.get("channels") or ["crawl"],
         category=schedule.get("topic"),
+        budget_usd=budget_usd,
     )
 
     next_run_at = compute_next_run(schedule["cadence"], now)

@@ -1,0 +1,40 @@
+# =============================================================================
+# API PRICING (WP-19)
+# =============================================================================
+# Single source of truth for Claude API pricing and the token-size
+# assumptions used by the pre-scan cost estimator
+# (ScanManager.estimate_cost, src/orchestration/scan_manager.py) and the
+# post-scan actual-cost calculation (ClaudeClient.update_cost_estimate,
+# src/core/llm.py). Neither of those hardcodes a price literal - both read
+# this file via src/core/pricing.py.
+#
+# An unrecognized model id (a stale settings.yaml value, a new model not
+# yet added here) falls back to the single most expensive known model
+# rather than guessing cheap, and logs a warning so the gap gets noticed.
+# =============================================================================
+
+# USD per million tokens, per model id.
+models:
+  claude-haiku-4-5-20251001:
+    input_per_mtok: 1.00
+    output_per_mtok: 5.00
+  claude-sonnet-4-6:
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+
+# Token-size assumptions for the pre-scan estimator. These are educated
+# guesses, not measurements - they get refined as real scan_history data
+# accumulates (see WP-25).
+estimator:
+  screening_input: 2000
+  screening_output: 50
+  analysis_input: 20000
+  analysis_output: 1000
+  auditor_input: 5000
+  auditor_output: 2000
+  # Structured sources (law_apis/transposition channels) skip the crawl
+  # page model and the keyword gate entirely (src/core/scanner.py marks
+  # every structured-source item is_relevant=True) - assume this many
+  # items reach screening per structured source. Assumed - no scan
+  # history yet to calibrate against (pending WP-25).
+  structured_items_per_source: 40

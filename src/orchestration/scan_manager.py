@@ -23,9 +23,10 @@ from ..core.keywords import build_keyword_matcher
 from ..core.llm import ClaudeClient
 from ..core.models import (
     Policy, ScanJob, ScanStatus, ScanProgress, DomainProgress,
-    DomainScanStatus, ScanEvent,
+    DomainScanStatus, ScanEvent, DEFAULT_ANALYSIS_MODEL,
 )
 from ..core.overrides import apply_domain_overrides
+from ..core.pricing import PricingLoader
 from ..core.scanner import DomainScanner
 from ..core.verifier import Verifier
 from ..storage.scan_history import ScanHistoryStore
@@ -56,6 +57,7 @@ class ScanManager:
         # means "no overlay" - start_scan/estimate_cost behave exactly as
         # before. deps.get_scan_manager() wires in the real store.
         self.domain_overrides_store = domain_overrides_store
+        self._pricing = PricingLoader()
 
         self._jobs: dict[str, ScanJob] = {}
         self._policies: dict[str, list[Policy]] = {}  # scan_id → policies
@@ -97,8 +99,16 @@ class ScanManager:
         policy_type: Optional[str] = None,
         channels: Optional[list[str]] = None,
         source_params: Optional[dict] = None,
+        budget_usd: Optional[float] = None,
     ) -> ScanJob:
-        """Start a new parallel scan. Returns immediately with scan_id."""
+        """Start a new parallel scan. Returns immediately with scan_id.
+
+        ``budget_usd`` (WP-22b), when set, is a running-cost cap: once the
+        LLM cost accrued so far reaches it, the scan stops launching further
+        domains (in-flight ones still finish) and completes normally with
+        ``job.budget_reached`` set. ``None`` (the default) means no cap -
+        every existing caller is unaffected.
+        """
         scan_id = str(uuid.uuid4())[:8]
         channels = channels or ["crawl"]
 
@@ -150,6 +160,7 @@ class ScanManager:
                 "dry_run": dry_run,
                 "deep": deep,
                 "channels": channels,
+                "budget_usd": budget_usd,
             },
         )
 
@@ -163,7 +174,7 @@ class ScanManager:
 
         # Launch background task
         task = asyncio.create_task(
-            self._run_scan(scan_id, domains, max_concurrent, skip_llm)
+            self._run_scan(scan_id, domains, max_concurrent, skip_llm, budget_usd)
         )
         self._tasks[scan_id] = task
         return job
@@ -249,6 +260,7 @@ class ScanManager:
         domains: list[dict],
         max_concurrent: int,
         skip_llm: bool,
+        budget_usd: Optional[float] = None,
     ) -> None:
         """Run the parallel scan (background task)."""
         # Bind scan context so every log message from this task (and its
@@ -360,6 +372,19 @@ class ScanManager:
 
         async def scan_domain(domain: dict) -> list[Policy]:
             async with semaphore:
+                # Mid-scan budget stop (WP-22b): an earlier domain already
+                # pushed running cost to the cap - don't launch this one.
+                # Domains already past the semaphore (in-flight) when the
+                # cap was reached still finish normally.
+                if budget_usd is not None and job.budget_reached:
+                    for dp in job.progress.domains:
+                        if dp.domain_id == domain["id"]:
+                            dp.status = DomainScanStatus.SKIPPED
+                            dp.error_message = "Skipped: scan budget reached"
+                            break
+                    job.progress.completed_domains += 1
+                    return []
+
                 domain = self._with_keyword_score_default(domain, settings)
                 # Bind domain context for log correlation
                 structlog.contextvars.bind_contextvars(
@@ -415,6 +440,27 @@ class ScanManager:
                             break
 
                     job.progress.completed_domains += 1
+
+                    # Mid-scan budget stop (WP-22b): cheap running-cost
+                    # check after each domain completes. Once it lands at
+                    # or past the cap, no further domain is launched (see
+                    # the check at the top of this function) - domains
+                    # already in flight when this trips still finish.
+                    if (
+                        budget_usd is not None
+                        and llm_client is not None
+                        and not job.budget_reached
+                    ):
+                        llm_client.update_cost_estimate()
+                        if llm_client.cost.total_usd >= budget_usd:
+                            job.budget_reached = True
+                            log_audit_event(
+                                data_dir=self.data_dir,
+                                event="scan_budget_reached",
+                                scan_id=scan_id,
+                                budget_usd=budget_usd,
+                                cost_usd=llm_client.cost.total_usd,
+                            )
 
                     # Persist policies immediately so they survive crashes.
                     # PolicyStore.add_policies deduplicates by URL and saves
@@ -539,6 +585,18 @@ class ScanManager:
                         ],
                     )
                     job.audit_advisory = advisory
+                    # Fold the auditor's own call into the scan's recorded
+                    # actuals (WP-22) - it never fires if generate_advisory
+                    # failed (last_input_tokens stays None), so nothing is
+                    # added in that case.
+                    if auditor.last_input_tokens is not None and job.cost:
+                        auditor_price = self._pricing.pricing_for(auditor.model)
+                        auditor_cost = auditor_price.cost_usd(
+                            auditor.last_input_tokens, auditor.last_output_tokens,
+                        )
+                        job.cost.input_tokens += auditor.last_input_tokens
+                        job.cost.output_tokens += auditor.last_output_tokens
+                        job.cost.total_usd = round(job.cost.total_usd + auditor_cost, 4)
                     await self.broadcaster.broadcast(ScanEvent(
                         scan_id=scan_id,
                         type="audit_complete",
@@ -636,7 +694,11 @@ class ScanManager:
             )
             history.record_completion(
                 scan_id=scan_id,
-                status="completed",
+                # job.status stays the enum-constrained ScanStatus.COMPLETED
+                # above - the scans table's status column is free text, so
+                # the budget-reached fact is distinguishable there without
+                # needing a new enum member (WP-22b).
+                status="completed_budget_reached" if job.budget_reached else "completed",
                 completed_at=job.completed_at,
                 domains_scanned=len(domains),
                 policies_found=len(all_policies),
@@ -703,10 +765,11 @@ class ScanManager:
             return True
         return False
 
-    # Deep scans lower min_keyword_score from the standard baseline (5.0, the
-    # keywords.yaml default) to 2.0 (see _with_deep_scan_defaults), which lets
-    # noticeably more pages pass the keyword gate. Assumption: that roughly
-    # doubles the pass rate used for the standard estimate below.
+    # Deep scans lower min_keyword_score from the standard baseline (3.0,
+    # settings.analysis.min_keyword_score's default per config/settings.yaml)
+    # to 2.0 (see _with_deep_scan_defaults), which lets noticeably more pages
+    # pass the keyword gate. Assumption: that roughly doubles the pass rate
+    # used for the standard estimate below.
     DEEP_KEYWORD_PASS_RATE = 0.20
 
     def estimate_cost(
@@ -723,6 +786,19 @@ class ScanManager:
         scoped to only law databases isn't costed as if it also crawled every
         website. ``None`` (the default) counts every domain, preserving the
         behavior of callers that don't pass it (e.g. cost_projection).
+
+        Screening/analysis models are resolved from
+        ``settings.analysis.screening_model``/``analysis_model`` - the same
+        place a real scan reads them from (see ``_run_scan``'s ClaudeClient
+        construction) - so an admin's cost-level choice
+        (``CostSettingsStore.apply_to_config``, applied once at startup and
+        on every settings-route update) changes the estimate too (WP-20).
+
+        Domains are split by channel (WP-21): crawl domains use the page/
+        keyword-gate model below; structured domains (law_apis,
+        transposition) skip both - real scans skip the keyword gate for them
+        entirely (src/core/scanner.py) - and instead assume a flat number of
+        items per source, all of which reach screening.
         """
         domains = self._overlay_domains(self.config.get_enabled_domains(domains_group))
         if channels is not None:
@@ -737,25 +813,93 @@ class ScanManager:
             max_pages_per_domain = self._with_deep_scan_defaults({})["max_pages"]
             keyword_pass_rate = self.DEEP_KEYWORD_PASS_RATE
 
-        est_pages_per_domain = max_pages_per_domain // 2
-        total_pages = len(domains) * est_pages_per_domain
         screening_pass_rate = 0.50
+        est = self._pricing.estimator
+        structured_items_per_source = est.get("structured_items_per_source", 40)
+        screening_input = est.get("screening_input", 2000)
+        screening_output = est.get("screening_output", 50)
+        analysis_input = est.get("analysis_input", 20000)
+        analysis_output = est.get("analysis_output", 1000)
+        auditor_input = est.get("auditor_input", 5000)
+        auditor_output = est.get("auditor_output", 2000)
 
-        keyword_passes = int(total_pages * keyword_pass_rate)
-        screening_calls = keyword_passes
-        analysis_calls = int(screening_calls * screening_pass_rate)
+        screening_price = self._pricing.pricing_for(settings.analysis.screening_model)
+        analysis_price = self._pricing.pricing_for(settings.analysis.analysis_model)
 
-        # Haiku: ~$0.25/M input, ~$1.25/M output
-        # Sonnet: ~$3/M input, ~$15/M output
-        haiku_cost = screening_calls * (2000 * 0.25 + 50 * 1.25) / 1_000_000
-        sonnet_cost = analysis_calls * (20000 * 3.0 + 1000 * 15.0) / 1_000_000
-        auditor_cost = (5000 * 3.0 + 2000 * 15.0) / 1_000_000
+        channel_domains: dict[str, list[dict]] = {}
+        for d in domains:
+            channel_domains.setdefault(self._domain_channel(d), []).append(d)
+
+        channels_out: dict[str, dict] = {}
+        total_pages = 0
+        total_keyword_passes = 0
+        total_screening_calls = 0
+        total_analysis_calls = 0
+        total_raw_cost = 0.0
+
+        for channel_name, group in channel_domains.items():
+            count = len(group)
+            if channel_name == "crawl":
+                est_pages_per_domain = max_pages_per_domain // 2
+                items_or_pages = count * est_pages_per_domain
+                keyword_passes = int(items_or_pages * keyword_pass_rate)
+                screening_calls = keyword_passes
+            else:
+                # Structured sources skip the crawl page model and the
+                # keyword gate entirely (scanner.py sets is_relevant=True
+                # unconditionally for them) - every assumed item reaches
+                # screening.
+                items_or_pages = count * structured_items_per_source
+                keyword_passes = items_or_pages
+                screening_calls = items_or_pages
+
+            analysis_calls = int(screening_calls * screening_pass_rate)
+
+            raw_cost = (
+                screening_calls * screening_price.cost_usd(screening_input, screening_output)
+                + analysis_calls * analysis_price.cost_usd(analysis_input, analysis_output)
+            )
+
+            channels_out[channel_name] = {
+                "domain_count": count,
+                "estimated_items_or_pages": items_or_pages,
+                "screening_calls": screening_calls,
+                "analysis_calls": analysis_calls,
+                "cost_usd": round(raw_cost, 2),
+            }
+
+            total_pages += items_or_pages
+            total_keyword_passes += keyword_passes
+            total_screening_calls += screening_calls
+            total_analysis_calls += analysis_calls
+            total_raw_cost += raw_cost
+
+        # Auditor: a single flat post-scan call, unconditional in this
+        # estimate (real scans skip it only when skip_llm/no api key/no
+        # policies found - see _run_scan) - priced at the model the
+        # auditor actually calls (Auditor's own default, not the
+        # cost-level-selected analysis model, since Auditor doesn't
+        # currently read the cost level).
+        auditor_price = self._pricing.pricing_for(DEFAULT_ANALYSIS_MODEL)
+        auditor_raw_cost = auditor_price.cost_usd(auditor_input, auditor_output)
+
+        assumptions = [
+            f"crawl: {max_pages_per_domain} max pages/domain configured, "
+            f"{max_pages_per_domain // 2} assumed crawled (half of max)",
+            f"crawl: {keyword_pass_rate:.0%} of crawled pages assumed to pass the keyword gate",
+            f"{screening_pass_rate:.0%} of screened items assumed to reach analysis",
+            f"structured sources: {structured_items_per_source} items each "
+            "(assumed - no scan history yet)",
+        ]
 
         return {
             "domain_count": len(domains),
             "estimated_pages": total_pages,
-            "estimated_keyword_passes": keyword_passes,
-            "estimated_screening_calls": screening_calls,
-            "estimated_analysis_calls": analysis_calls,
-            "estimated_cost_usd": round(haiku_cost + sonnet_cost + auditor_cost, 2),
+            "estimated_keyword_passes": total_keyword_passes,
+            "estimated_screening_calls": total_screening_calls,
+            "estimated_analysis_calls": total_analysis_calls,
+            "estimated_cost_usd": round(total_raw_cost + auditor_raw_cost, 2),
+            "channels": channels_out,
+            "auditor_cost_usd": round(auditor_raw_cost, 2),
+            "assumptions": assumptions,
         }

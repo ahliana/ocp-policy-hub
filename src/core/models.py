@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
-# Model IDs — single source of truth for Claude model defaults.
+# Model IDs - single source of truth for Claude model defaults.
 #
 # Users override via .env (SCREENING_MODEL, ANALYSIS_MODEL) or settings.yaml.
 # All other modules import these constants instead of hardcoding model strings.
@@ -280,6 +280,15 @@ class CostInfo(BaseModel):
     output_tokens: int = 0
     screening_calls: int = 0
     analysis_calls: int = 0
+    # Per-stage token counters (WP-22) - input_tokens/output_tokens above
+    # remain the maintained totals (screening + analysis + auditor) so the
+    # scans table and any other consumer of the aggregate keeps working;
+    # these let update_cost_estimate() price each stage at its own model
+    # instead of blending by call-count fraction over a shared pool.
+    screening_input_tokens: int = 0
+    screening_output_tokens: int = 0
+    analysis_input_tokens: int = 0
+    analysis_output_tokens: int = 0
     total_usd: float = 0.0
 
 
@@ -306,6 +315,9 @@ class ScanJob(BaseModel):
     audit_advisory: Optional[str] = None
     options: dict[str, Any] = Field(default_factory=dict)
     sheets_export: SheetsExportStatus = Field(default_factory=SheetsExportStatus)
+    # Set once running cost reaches the scan's budget_usd cap (WP-22b);
+    # the scan still completes normally with whatever domains finished.
+    budget_reached: bool = False
 
 
 # --- API Request/Response Schemas ---
@@ -329,6 +341,10 @@ class ScanRequest(BaseModel):
     # Per-request overrides for structured sources (e.g. {"state": "CA",
     # "terms": [...]} from a place-first search). Crawl domains ignore this.
     source_params: Optional[dict] = None
+    # Mid-scan budget stop (WP-22b). None = no cap (default, unchanged
+    # behavior). Schedules pass their remaining monthly ceiling here so a
+    # scan stops launching further domains once running cost reaches it.
+    budget_usd: Optional[float] = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_scan_mode(self) -> "ScanRequest":

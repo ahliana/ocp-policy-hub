@@ -13,6 +13,7 @@ from .models import (
     Policy, PolicyType, PolicyAnalysis, ScreeningResult, CostInfo,
     DEFAULT_ANALYSIS_MODEL, DEFAULT_SCREENING_MODEL,
 )
+from .pricing import PricingLoader
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ TASK:
    additional_policies. For each policy:
    - Policy name/title (in original language if not English). If the page
      is relevant but states no clear title, write a short descriptive
-     label (e.g. "Dutch waste heat feed-in regulation") — never leave the
+     label (e.g. "Dutch waste heat feed-in regulation") - never leave the
      name empty for a relevant policy.
    - Jurisdiction (country/region)
    - Type (law/regulation/directive/incentive/grant/plan)
@@ -250,7 +251,7 @@ def _coerce_types(data: dict) -> dict:
                 result["relevance_score"] = int(float(val))
             except (ValueError, IndexError):
                 logger.warning(
-                    "LLM returned unparseable relevance_score=%r — defaulting to 0. "
+                    "LLM returned unparseable relevance_score=%r - defaulting to 0. "
                     "This may cause the policy to be ranked lower than expected.",
                     raw_val,
                 )
@@ -338,10 +339,10 @@ def _resolve_model(
             role.capitalize(), model_id, family,
         )
     except Exception:
-        # Network/auth errors — don't block startup, assume model is fine
+        # Network/auth errors - don't block startup, assume model is fine
         return model_id
 
-    # Model not found — try to find the newest model in the same family
+    # Model not found - try to find the newest model in the same family
     try:
         available = list(client.models.list(limit=100))
         candidates = [m for m in available if family in m.id]
@@ -366,7 +367,7 @@ def _resolve_model(
         "See: https://docs.anthropic.com/en/docs/about-claude/models",
         family, role.upper(),
     )
-    return model_id  # Return original — will fail at first actual use
+    return model_id  # Return original - will fail at first actual use
 
 
 # --- Client ---
@@ -381,7 +382,7 @@ class ClaudeClient:
     """
 
     MAX_RETRIES = 3
-    BASE_DELAY = 10.0   # generous fallback — API retry-after is usually 60-120s
+    BASE_DELAY = 10.0   # generous fallback - API retry-after is usually 60-120s
     MAX_DELAY = 120.0   # cap matches typical API retry-after values
     MAX_CONTENT_CHARS = 45000
 
@@ -396,6 +397,7 @@ class ClaudeClient:
         self.analysis_model = analysis_model
         self.screening_model = screening_model
         self.cost = CostInfo()
+        self._pricing = PricingLoader()
         self._validate_models()
 
     # ------------------------------------------------------------------
@@ -407,7 +409,7 @@ class ClaudeClient:
         try:
             sync_client = anthropic.Anthropic(api_key=self._api_key)
         except Exception:
-            return  # Can't create sync client — skip validation
+            return  # Can't create sync client - skip validation
 
         self.screening_model = _resolve_model(
             sync_client, self.screening_model, "screening", "haiku",
@@ -421,13 +423,13 @@ class ClaudeClient:
     ) -> ScreeningResult:
         """Quick relevance screening using Haiku.
 
-        Retries on rate limits to avoid failing open unnecessarily — if
+        Retries on rate limits to avoid failing open unnecessarily - if
         screening fails open, the page goes to expensive Sonnet analysis,
         which worsens rate limit pressure and costs.  Only falls open on
         non-retryable errors (connection issues, parse failures).
 
         The confidence gate (drop only when the model is confident the page
-        is irrelevant) is applied by the caller — see DomainScanner.
+        is irrelevant) is applied by the caller - see DomainScanner.
 
         Args:
             content: Full page text.
@@ -458,6 +460,8 @@ class ClaudeClient:
                 if hasattr(response, "usage"):
                     self.cost.input_tokens += response.usage.input_tokens
                     self.cost.output_tokens += response.usage.output_tokens
+                    self.cost.screening_input_tokens += response.usage.input_tokens
+                    self.cost.screening_output_tokens += response.usage.output_tokens
                     logger.info(
                         "llm_call: screening model=%s url=%s "
                         "input_tokens=%d output_tokens=%d latency_ms=%d",
@@ -491,7 +495,7 @@ class ClaudeClient:
                 raise LLMAuthError(f"Authentication failed: {e}") from e
 
             except anthropic.RateLimitError as e:
-                # Retry screening on rate limit — falling open here would
+                # Retry screening on rate limit - falling open here would
                 # send ALL pages to expensive Sonnet analysis, making the
                 # rate limit cascade worse.
                 if attempt < self.MAX_RETRIES:
@@ -510,14 +514,14 @@ class ClaudeClient:
                     await asyncio.sleep(retry_after)
                     delay = min(delay * 2, self.MAX_DELAY)
                 else:
-                    # Exhausted retries — fail open as last resort
+                    # Exhausted retries - fail open as last resort
                     logger.warning(
                         f"Screening rate limit exhausted for {url}, assuming relevant"
                     )
                     return ScreeningResult(relevant=True, confidence=5)
 
             except anthropic.NotFoundError:
-                # Model doesn't exist — log ONCE and disable screening
+                # Model doesn't exist - log ONCE and disable screening
                 if not getattr(self, "_screening_model_warned", False):
                     logger.error(
                         f"Screening model '{self.screening_model}' not found (404). "
@@ -621,6 +625,8 @@ class ClaudeClient:
         if hasattr(response, "usage"):
             self.cost.input_tokens += response.usage.input_tokens
             self.cost.output_tokens += response.usage.output_tokens
+            self.cost.analysis_input_tokens += response.usage.input_tokens
+            self.cost.analysis_output_tokens += response.usage.output_tokens
             logger.info(
                 "llm_call: analysis model=%s url=%s "
                 "input_tokens=%d output_tokens=%d latency_ms=%d",
@@ -715,31 +721,26 @@ class ClaudeClient:
         return policies
 
     def update_cost_estimate(self):
-        """Update USD cost estimate based on token usage."""
-        # Pricing per million tokens (approximate)
-        HAIKU_INPUT = 0.25
-        HAIKU_OUTPUT = 1.25
-        SONNET_INPUT = 3.0
-        SONNET_OUTPUT = 15.0
+        """Recompute USD cost exactly from per-stage token usage (WP-22).
 
-        # Rough split: screening uses Haiku, analysis uses Sonnet
-        # We don't track per-model tokens separately, so estimate
-        if self.cost.screening_calls > 0 and self.cost.analysis_calls > 0:
-            total_calls = self.cost.screening_calls + self.cost.analysis_calls
-            haiku_frac = self.cost.screening_calls / total_calls
-            sonnet_frac = self.cost.analysis_calls / total_calls
+        Screening tokens are priced at ``self.screening_model``, analysis
+        tokens at ``self.analysis_model`` - each from the WP-19 pricing
+        table. No call-count-fraction blend over a shared token pool: the
+        two stages use different models with a 3x price gap, so blending by
+        call count (rather than tracking each stage's tokens separately)
+        used to misprice every scan that mixed both stages.
+        """
+        screening_price = self._pricing.pricing_for(self.screening_model)
+        analysis_price = self._pricing.pricing_for(self.analysis_model)
 
-            input_cost = self.cost.input_tokens * (
-                haiku_frac * HAIKU_INPUT + sonnet_frac * SONNET_INPUT
-            ) / 1_000_000
-            output_cost = self.cost.output_tokens * (
-                haiku_frac * HAIKU_OUTPUT + sonnet_frac * SONNET_OUTPUT
-            ) / 1_000_000
-        else:
-            input_cost = self.cost.input_tokens * SONNET_INPUT / 1_000_000
-            output_cost = self.cost.output_tokens * SONNET_OUTPUT / 1_000_000
+        screening_cost = screening_price.cost_usd(
+            self.cost.screening_input_tokens, self.cost.screening_output_tokens,
+        )
+        analysis_cost = analysis_price.cost_usd(
+            self.cost.analysis_input_tokens, self.cost.analysis_output_tokens,
+        )
 
-        self.cost.total_usd = round(input_cost + output_cost, 4)
+        self.cost.total_usd = round(screening_cost + analysis_cost, 4)
 
     async def close(self):
         await self.client.close()

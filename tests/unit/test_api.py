@@ -437,6 +437,39 @@ class TestScanRoutes:
         assert data["options"]["channels"] == ["law_apis"]
         assert mock_manager.start_scan.await_args.kwargs["channels"] == ["law_apis"]
 
+    @pytest.mark.medium
+    def test_start_scan_passes_budget_usd(self, client, mock_manager):
+        job = ScanJob(scan_id="s1", status=ScanStatus.RUNNING, domain_count=1)
+        mock_manager.start_scan = AsyncMock(return_value=job)
+
+        response = client.post(
+            "/api/scans",
+            json={"domains": "quick", "skip_llm": True, "budget_usd": 5.0},
+        )
+
+        assert response.status_code == 200
+        assert mock_manager.start_scan.await_args.kwargs["budget_usd"] == 5.0
+
+    @pytest.mark.medium
+    def test_start_scan_negative_budget_usd_rejected(self, client):
+        response = client.post(
+            "/api/scans",
+            json={"domains": "quick", "skip_llm": True, "budget_usd": -1.0},
+        )
+        assert response.status_code == 422
+
+    @pytest.mark.medium
+    def test_start_scan_omitted_budget_usd_defaults_to_none(self, client, mock_manager):
+        job = ScanJob(scan_id="s1", status=ScanStatus.RUNNING, domain_count=1)
+        mock_manager.start_scan = AsyncMock(return_value=job)
+
+        response = client.post(
+            "/api/scans", json={"domains": "quick", "skip_llm": True},
+        )
+
+        assert response.status_code == 200
+        assert mock_manager.start_scan.await_args.kwargs["budget_usd"] is None
+
     def test_list_scans_empty(self, client):
         response = client.get("/api/scans")
         assert response.status_code == 200
@@ -511,6 +544,23 @@ class TestScanRoutes:
         data = response.json()
         assert data["scan_id"] == "s1"
         assert data["progress"]["total"] == 2
+        assert data["budget_reached"] is False
+
+    @pytest.mark.medium
+    def test_get_scan_detail_exposes_budget_reached(self, client, mock_manager):
+        """WP-22b: the mid-scan budget-stop flag must be visible via the
+        route, not just on the in-memory job object."""
+        job = ScanJob(
+            scan_id="s1", status=ScanStatus.COMPLETED, domain_count=4,
+            budget_reached=True,
+        )
+        mock_manager.jobs = {"s1": job}
+        mock_manager.get_policies.return_value = []
+
+        response = client.get("/api/scans/s1")
+
+        assert response.status_code == 200
+        assert response.json()["budget_reached"] is True
 
     def test_cancel_scan_not_found(self, client, mock_manager):
         mock_manager.stop_scan = AsyncMock(return_value=False)

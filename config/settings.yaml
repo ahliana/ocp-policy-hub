@@ -89,7 +89,9 @@ analysis:
   enable_two_stage: true
 
   # Model for quick relevance screening (fast and cheap)
-  # Haiku costs ~$0.25/MTok vs Sonnet ~$3/MTok (12x cheaper)
+  # Haiku costs ~$1/MTok input, ~$5/MTok output vs Sonnet ~$3/$15 (~3x
+  # cheaper). See config/pricing.yaml for the exact per-model rates used by
+  # the cost estimator and actual-cost calculation.
   screening_model: "claude-haiku-4-5-20251001"
 
   # A screening REJECTION only sticks when the screener's confidence is at

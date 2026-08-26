@@ -55,6 +55,7 @@ async def start_scan(
         policy_type=request.policy_type,
         channels=request.channels,
         source_params=request.source_params,
+        budget_usd=request.budget_usd,
     )
     return {
         "scan_id": job.scan_id,
@@ -205,6 +206,7 @@ def get_scan(
         "policies": [p.model_dump(mode="json") for p in policies],
         "cost": job.cost.model_dump() if job.cost else None,
         "audit_advisory": job.audit_advisory,
+        "budget_reached": job.budget_reached,
     }
 
 

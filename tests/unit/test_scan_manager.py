@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.core.config import ConfigLoader, ConfigurationError
-from src.core.models import DomainProgress, DomainScanStatus, Policy, PolicyType
+from src.core.models import (
+    CostInfo, DomainProgress, DomainScanStatus, Policy, PolicyType,
+    DEFAULT_ANALYSIS_MODEL, DEFAULT_SCREENING_MODEL,
+)
+from src.core.pricing import PricingLoader
 from src.orchestration.events import EventBroadcaster
 from src.orchestration.scan_manager import ScanManager
 from src.storage.scan_history import ScanHistoryStore
@@ -294,7 +298,12 @@ class TestRejectedUrlStatuses:
         assert ScanManager._rejected_url_statuses(store) == {}
 
 
-def _manager_with_config(get_enabled_domains_return=None, get_enabled_domains_side_effect=None):
+def _manager_with_config(
+    get_enabled_domains_return=None, get_enabled_domains_side_effect=None,
+    screening_model=None, analysis_model=None,
+):
+    from src.core.models import DEFAULT_ANALYSIS_MODEL, DEFAULT_SCREENING_MODEL
+
     config = MagicMock()
     if get_enabled_domains_side_effect is not None:
         config.get_enabled_domains.side_effect = get_enabled_domains_side_effect
@@ -303,6 +312,8 @@ def _manager_with_config(get_enabled_domains_return=None, get_enabled_domains_si
     settings = MagicMock()
     settings.crawl.max_pages_per_domain = 200
     settings.analysis.min_keyword_score = 3.0
+    settings.analysis.screening_model = screening_model or DEFAULT_SCREENING_MODEL
+    settings.analysis.analysis_model = analysis_model or DEFAULT_ANALYSIS_MODEL
     config.settings = settings
     return ScanManager(config=config, broadcaster=MagicMock())
 
@@ -325,6 +336,9 @@ class TestEstimateCost:
             manager.estimate_cost("bogus")
 
     def test_valid_scope_returns_expected_shape(self):
+        """WP-21: every pre-existing key is kept (frontend depends on them)
+        and three new ones are added: channels, auditor_cost_usd,
+        assumptions."""
         domains = [{"id": f"d{i}", "name": f"D{i}"} for i in range(5)]
         manager = _manager_with_config(get_enabled_domains_return=domains)
 
@@ -338,8 +352,14 @@ class TestEstimateCost:
             "estimated_screening_calls",
             "estimated_analysis_calls",
             "estimated_cost_usd",
+            "channels",
+            "auditor_cost_usd",
+            "assumptions",
         }
         assert result["estimated_cost_usd"] > 0
+        assert result["auditor_cost_usd"] > 0
+        assert isinstance(result["assumptions"], list)
+        assert all(isinstance(a, str) for a in result["assumptions"])
 
     def test_deep_estimate_is_strictly_higher_than_standard(self):
         domains = [{"id": f"d{i}", "name": f"D{i}"} for i in range(5)]
@@ -371,6 +391,203 @@ class TestEstimateCost:
         domains = [{"id": f"d{i}", "name": f"D{i}"} for i in range(4)]
         manager = _manager_with_config(get_enabled_domains_return=domains)
         assert manager.estimate_cost("quick")["domain_count"] == 4
+
+    @pytest.mark.medium
+    def test_reacts_to_monkeypatched_pricing_table(self, tmp_path):
+        """WP-19: estimate_cost() must actually consult the pricing table,
+        not a constant baked into the function."""
+        domains = [{"id": "d1", "name": "D1"}]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+        baseline = manager.estimate_cost("quick")["estimated_cost_usd"]
+
+        (tmp_path / "pricing.yaml").write_text(
+            "models:\n"
+            f"  {DEFAULT_SCREENING_MODEL}:\n"
+            "    input_per_mtok: 1000.0\n"
+            "    output_per_mtok: 1000.0\n"
+            f"  {DEFAULT_ANALYSIS_MODEL}:\n"
+            "    input_per_mtok: 1000.0\n"
+            "    output_per_mtok: 1000.0\n"
+            "estimator:\n"
+            "  screening_input: 2000\n"
+            "  screening_output: 50\n"
+            "  analysis_input: 20000\n"
+            "  analysis_output: 1000\n"
+            "  auditor_input: 5000\n"
+            "  auditor_output: 2000\n"
+            "  structured_items_per_source: 40\n",
+            encoding="utf-8",
+        )
+        manager._pricing = PricingLoader(config_dir=str(tmp_path))
+
+        inflated = manager.estimate_cost("quick")["estimated_cost_usd"]
+
+        assert inflated > baseline * 100
+
+
+@pytest.mark.small
+class TestEstimateCostRespectsCostLevel:
+    """WP-20: estimate_cost() reads settings.analysis.{screening,analysis}
+    _model - the exact attributes CostSettingsStore.apply_to_config()
+    mutates - so an admin's cost level (low/standard/high) changes the
+    estimate, matching what a real scan would actually spend.
+    """
+
+    LEVELS = {
+        "low": (DEFAULT_SCREENING_MODEL, DEFAULT_SCREENING_MODEL),
+        "standard": (DEFAULT_SCREENING_MODEL, DEFAULT_ANALYSIS_MODEL),
+        "high": (DEFAULT_ANALYSIS_MODEL, DEFAULT_ANALYSIS_MODEL),
+    }
+
+    @staticmethod
+    def _expected_cost_usd(screening_model: str, analysis_model: str, domain_count: int = 5) -> float:
+        """Independently derives the expected dollar figure straight from
+        the real pricing.yaml table, so this is an exact-math check, not
+        just a greater-than comparison."""
+        pricing = PricingLoader()
+        est = pricing.estimator
+        screening_price = pricing.pricing_for(screening_model)
+        analysis_price = pricing.pricing_for(analysis_model)
+
+        est_pages_per_domain = 200 // 2
+        total_pages = domain_count * est_pages_per_domain
+        keyword_passes = int(total_pages * 0.10)
+        screening_calls = keyword_passes
+        analysis_calls = int(screening_calls * 0.50)
+
+        raw = (
+            screening_calls * screening_price.cost_usd(
+                est["screening_input"], est["screening_output"]
+            )
+            + analysis_calls * analysis_price.cost_usd(
+                est["analysis_input"], est["analysis_output"]
+            )
+        )
+        auditor_price = pricing.pricing_for(DEFAULT_ANALYSIS_MODEL)
+        auditor_raw = auditor_price.cost_usd(est["auditor_input"], est["auditor_output"])
+        return round(raw + auditor_raw, 2)
+
+    @pytest.mark.parametrize("level", ["low", "standard", "high"])
+    def test_matches_expected_dollars_for_level(self, level):
+        screening_model, analysis_model = self.LEVELS[level]
+        domains = [{"id": f"d{i}", "name": f"D{i}"} for i in range(5)]
+        manager = _manager_with_config(
+            get_enabled_domains_return=domains,
+            screening_model=screening_model, analysis_model=analysis_model,
+        )
+
+        result = manager.estimate_cost("quick")
+
+        assert result["estimated_cost_usd"] == self._expected_cost_usd(
+            screening_model, analysis_model,
+        )
+
+    def test_low_cheaper_than_standard_cheaper_than_high(self):
+        domains = [{"id": f"d{i}", "name": f"D{i}"} for i in range(5)]
+
+        def _cost(level):
+            screening_model, analysis_model = self.LEVELS[level]
+            manager = _manager_with_config(
+                get_enabled_domains_return=domains,
+                screening_model=screening_model, analysis_model=analysis_model,
+            )
+            return manager.estimate_cost("quick")["estimated_cost_usd"]
+
+        assert _cost("low") < _cost("standard") < _cost("high")
+
+
+@pytest.mark.small
+class TestEstimateCostChannels:
+    """WP-21: crawl vs structured domains get different cost models
+    (structured sources skip the crawl page model and the keyword gate
+    entirely, mirroring scanner.py's real behavior), and the response
+    exposes a per-channel breakdown alongside the pre-existing aggregate
+    keys.
+    """
+
+    def test_crawl_only_channel_breakdown(self):
+        domains = [{"id": f"c{i}", "name": f"C{i}"} for i in range(3)]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+
+        result = manager.estimate_cost("quick")
+
+        assert set(result["channels"].keys()) == {"crawl"}
+        crawl = result["channels"]["crawl"]
+        assert crawl["domain_count"] == 3
+        assert crawl["estimated_items_or_pages"] == result["estimated_pages"]
+        assert crawl["cost_usd"] > 0
+
+    def test_structured_only_channel_uses_flat_items_no_keyword_gate(self):
+        domains = [
+            {"id": f"a{i}", "name": f"A{i}", "source_type": "legiscan"}
+            for i in range(2)
+        ]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+
+        result = manager.estimate_cost("quick")
+
+        assert set(result["channels"].keys()) == {"law_apis"}
+        law_apis = result["channels"]["law_apis"]
+        assert law_apis["domain_count"] == 2
+        # 2 sources * 40 assumed items/source (pricing.yaml estimator default)
+        assert law_apis["estimated_items_or_pages"] == 80
+        # No keyword gate for structured sources: every assumed item reaches
+        # screening (scanner.py sets is_relevant=True unconditionally).
+        assert law_apis["screening_calls"] == 80
+        assert result["estimated_keyword_passes"] == 80
+
+    def test_mixed_scopes_split_by_channel(self):
+        domains = (
+            [{"id": f"c{i}", "name": f"C{i}"} for i in range(2)]
+            + [{"id": "eu1", "name": "EU1", "source_type": "eurlex_nim"}]
+            + [{"id": "a1", "name": "A1", "source_type": "legiscan"}]
+        )
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+
+        result = manager.estimate_cost("quick")
+
+        assert set(result["channels"].keys()) == {"crawl", "transposition", "law_apis"}
+        assert result["channels"]["crawl"]["domain_count"] == 2
+        assert result["channels"]["transposition"]["domain_count"] == 1
+        assert result["channels"]["law_apis"]["domain_count"] == 1
+
+        channel_sum = sum(c["cost_usd"] for c in result["channels"].values())
+        assert result["estimated_cost_usd"] == pytest.approx(
+            channel_sum + result["auditor_cost_usd"], abs=0.05,
+        )
+
+    def test_channels_param_still_filters_the_breakdown(self):
+        domains = (
+            [{"id": f"c{i}", "name": f"C{i}"} for i in range(3)]
+            + [{"id": f"a{i}", "name": f"A{i}", "source_type": "legiscan"} for i in range(2)]
+        )
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+
+        apis_only = manager.estimate_cost("quick", channels=["law_apis"])
+
+        assert set(apis_only["channels"].keys()) == {"law_apis"}
+
+    def test_response_keeps_every_pre_existing_key(self):
+        """Backward-compat: the frontend reads these top-level keys directly."""
+        domains = [{"id": f"d{i}", "name": f"D{i}"} for i in range(3)]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+
+        result = manager.estimate_cost("quick")
+
+        for key in (
+            "domain_count", "estimated_pages", "estimated_keyword_passes",
+            "estimated_screening_calls", "estimated_analysis_calls",
+            "estimated_cost_usd",
+        ):
+            assert key in result
+
+    def test_assumptions_mentions_structured_items_assumption(self):
+        domains = [{"id": "d1", "name": "D1"}]
+        manager = _manager_with_config(get_enabled_domains_return=domains)
+
+        result = manager.estimate_cost("quick")
+
+        assert any("structured sources" in a for a in result["assumptions"])
 
 
 def _minimal_config(config_dir) -> ConfigLoader:
@@ -555,3 +772,236 @@ class TestScanHistoryWiring:
         await manager.start_scan(domains_group="quick", skip_llm=True, dry_run=True)
 
         assert ScanHistoryStore(data_dir=str(data_dir)).list() == []
+
+
+@pytest.mark.medium
+class TestAuditorCostIntegration:
+    """WP-22: the auditor's own Sonnet call must land in job.cost when it
+    fires (folded in at scan_manager.py's post-scan auditor block), and
+    must not fabricate cost when the auditor never runs.
+    """
+
+    def _manager(
+        self, tmp_path, monkeypatch, *,
+        policies=None, auditor_usage=(4500, 300), auditor_advisory="ok",
+    ):
+        config = _minimal_config(tmp_path / "config")
+        data_dir = tmp_path / "data"
+        manager = ScanManager(
+            config=config, broadcaster=EventBroadcaster(), data_dir=str(data_dir),
+            api_key="sk-ant-test",
+        )
+
+        mock_scanner = MagicMock()
+        mock_scanner.scan = AsyncMock(return_value=policies or [])
+        mock_scanner.progress = DomainProgress(
+            domain_id="test_gov", domain_name="Test Gov",
+            status=DomainScanStatus.COMPLETED,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.DomainScanner",
+            lambda **kwargs: mock_scanner,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.AsyncCrawler",
+            lambda **kwargs: MagicMock(close=AsyncMock()),
+        )
+
+        fake_llm = MagicMock()
+        fake_llm.cost = CostInfo()
+        fake_llm.close = AsyncMock()
+        fake_llm.update_cost_estimate = MagicMock()
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.ClaudeClient", lambda **kwargs: fake_llm,
+        )
+
+        class _FakeAuditor:
+            def __init__(self, api_key, **kwargs):
+                self.model = DEFAULT_ANALYSIS_MODEL
+                self.last_input_tokens = None
+                self.last_output_tokens = None
+                self.close = AsyncMock()
+
+            async def generate_advisory(self, **kwargs):
+                if auditor_usage is not None:
+                    self.last_input_tokens, self.last_output_tokens = auditor_usage
+                return auditor_advisory
+
+        monkeypatch.setattr("src.orchestration.scan_manager.Auditor", _FakeAuditor)
+
+        return manager, data_dir
+
+    def _policy(self) -> Policy:
+        return Policy(
+            url="https://test.gov/p1", policy_name="P", jurisdiction="US",
+            policy_type=PolicyType.LAW, summary="s", relevance_score=7,
+        )
+
+    @pytest.mark.asyncio
+    async def test_auditor_cost_included_when_it_fires(self, tmp_path, monkeypatch):
+        manager, data_dir = self._manager(
+            tmp_path, monkeypatch, policies=[self._policy()],
+        )
+
+        job = await manager.start_scan(domains_group="quick", skip_llm=False)
+        await manager._tasks[job.scan_id]
+
+        assert job.cost.input_tokens >= 4500
+        assert job.cost.output_tokens >= 300
+        assert job.cost.total_usd > 0
+
+    @pytest.mark.asyncio
+    async def test_auditor_cost_matches_pricing_table(self, tmp_path, monkeypatch):
+        manager, data_dir = self._manager(
+            tmp_path, monkeypatch, policies=[self._policy()], auditor_usage=(5000, 2000),
+        )
+
+        job = await manager.start_scan(domains_group="quick", skip_llm=False)
+        await manager._tasks[job.scan_id]
+
+        sonnet = manager._pricing.pricing_for(DEFAULT_ANALYSIS_MODEL)
+        expected = round(sonnet.cost_usd(5000, 2000), 4)
+        assert job.cost.total_usd == expected
+
+    @pytest.mark.asyncio
+    async def test_auditor_cost_absent_when_no_policies_found(self, tmp_path, monkeypatch):
+        # Auditor only fires when all_policies is non-empty (see the guard
+        # in scan_manager.py) - no policies means no auditor call at all.
+        manager, data_dir = self._manager(tmp_path, monkeypatch, policies=[])
+
+        job = await manager.start_scan(domains_group="quick", skip_llm=False)
+        await manager._tasks[job.scan_id]
+
+        assert job.cost.total_usd == 0
+        assert job.cost.input_tokens == 0
+        assert job.cost.output_tokens == 0
+
+    @pytest.mark.asyncio
+    async def test_auditor_cost_absent_when_skip_llm(self, tmp_path, monkeypatch):
+        manager, data_dir = self._manager(
+            tmp_path, monkeypatch, policies=[self._policy()],
+        )
+
+        job = await manager.start_scan(domains_group="quick", skip_llm=True)
+        await manager._tasks[job.scan_id]
+
+        assert job.cost.total_usd == 0
+
+
+@pytest.mark.medium
+class TestBudgetStop:
+    """WP-22b: a scan stops launching further domains once running cost
+    reaches budget_usd. max_concurrent=1 makes domain processing order
+    deterministic, so "stops within one domain of the cap" is directly
+    observable.
+    """
+
+    def _manager(self, tmp_path, monkeypatch, *, domain_count=4, cost_per_domain=5.0):
+        config = _minimal_config(tmp_path / "config")
+        # get_enabled_domains() resolves a group through a set() internally
+        # (src/core/config.py), so real multi-domain group order isn't
+        # guaranteed - override it directly so domain processing order
+        # (with max_concurrent=1) is deterministic for this test.
+        ordered_domains = [
+            {"id": f"d{i}", "name": f"D{i}", "base_url": f"https://d{i}.gov",
+             "start_paths": ["/"]}
+            for i in range(domain_count)
+        ]
+        monkeypatch.setattr(
+            config, "get_enabled_domains",
+            lambda group: [dict(d) for d in ordered_domains],
+        )
+        data_dir = tmp_path / "data"
+        manager = ScanManager(
+            config=config, broadcaster=EventBroadcaster(), data_dir=str(data_dir),
+            api_key="sk-ant-test",
+        )
+
+        calls = {"n": 0}
+
+        async def _fake_scan():
+            calls["n"] += 1
+            return []
+
+        mock_scanner = MagicMock()
+        mock_scanner.scan = AsyncMock(side_effect=_fake_scan)
+        mock_scanner.progress = DomainProgress(
+            domain_id="d0", domain_name="D0", status=DomainScanStatus.COMPLETED,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.DomainScanner",
+            lambda **kwargs: mock_scanner,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.AsyncCrawler",
+            lambda **kwargs: MagicMock(close=AsyncMock()),
+        )
+
+        fake_llm = MagicMock()
+        fake_llm.cost = CostInfo()
+        fake_llm.close = AsyncMock()
+        # Idempotent recompute (like the real ClaudeClient.update_cost_estimate)
+        # keyed off how many domains actually called scan() so far - a
+        # skipped domain (never scans) must not add to cost, and a repeat
+        # call (the unconditional one at scan end) must not double-count.
+        fake_llm.update_cost_estimate = MagicMock(
+            side_effect=lambda: setattr(
+                fake_llm.cost, "total_usd", round(calls["n"] * cost_per_domain, 4),
+            )
+        )
+        monkeypatch.setattr(
+            "src.orchestration.scan_manager.ClaudeClient", lambda **kwargs: fake_llm,
+        )
+
+        return manager, data_dir
+
+    @pytest.mark.asyncio
+    async def test_stops_within_one_domain_of_the_cap(self, tmp_path, monkeypatch):
+        manager, data_dir = self._manager(tmp_path, monkeypatch)
+
+        job = await manager.start_scan(
+            domains_group="quick", skip_llm=False, max_concurrent=1, budget_usd=12.0,
+        )
+        await manager._tasks[job.scan_id]
+
+        assert job.budget_reached is True
+        statuses = {dp.domain_id: dp.status for dp in job.progress.domains}
+        # $5/domain, cap $12: d0 ($5) and d1 ($10) run, d2 ($15) crosses the
+        # cap and still finishes (in-flight), d3 is skipped.
+        assert statuses["d0"] == DomainScanStatus.COMPLETED
+        assert statuses["d1"] == DomainScanStatus.COMPLETED
+        assert statuses["d2"] == DomainScanStatus.COMPLETED
+        assert statuses["d3"] == DomainScanStatus.SKIPPED
+        assert job.cost.total_usd == 15.0
+
+    @pytest.mark.asyncio
+    async def test_budget_reached_recorded_in_history_and_route_shape(self, tmp_path, monkeypatch):
+        manager, data_dir = self._manager(tmp_path, monkeypatch)
+
+        job = await manager.start_scan(
+            domains_group="quick", skip_llm=False, max_concurrent=1, budget_usd=12.0,
+        )
+        await manager._tasks[job.scan_id]
+
+        row = ScanHistoryStore(data_dir=str(data_dir)).list()[0]
+        assert row["status"] == "completed_budget_reached"
+        # job.status itself stays the enum-constrained COMPLETED.
+        assert manager.jobs[job.scan_id].status.value == "completed"
+        assert manager.jobs[job.scan_id].budget_reached is True
+
+    @pytest.mark.asyncio
+    async def test_no_budget_behaves_exactly_as_before(self, tmp_path, monkeypatch):
+        manager, data_dir = self._manager(tmp_path, monkeypatch)
+
+        job = await manager.start_scan(
+            domains_group="quick", skip_llm=False, max_concurrent=1,
+        )
+        await manager._tasks[job.scan_id]
+
+        assert job.budget_reached is False
+        assert all(
+            dp.status != DomainScanStatus.SKIPPED for dp in job.progress.domains
+        )
+        assert job.cost.total_usd == 20.0
+        row = ScanHistoryStore(data_dir=str(data_dir)).list()[0]
+        assert row["status"] == "completed"
