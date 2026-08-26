@@ -14,7 +14,7 @@ const LIFECYCLE_STAGE_OPTIONS = [
 ];
 
 // Sensible default direction per backend sort key (src/storage/store.py
-// PolicyStore._SORT_COLUMNS) — a fresh click on a column starts here.
+// PolicyStore._SORT_COLUMNS) - a fresh click on a column starts here.
 const SORT_DEFAULT_DIR = {
     name: 'asc',
     jurisdiction: 'asc',
@@ -48,7 +48,7 @@ function rowStatusClass(status) {
 }
 
 // Admin review surface over the full persisted database (WP-4 "the
-// Library") — GET /api/policies/library, paginated/sorted/filtered in SQL
+// Library") - GET /api/policies/library, paginated/sorted/filtered in SQL
 // (see src/storage/store.py). Distinct from PolicyList: no in-memory scan
 // merge, no public-visibility clamp, rejected rows included.
 function LibraryView() {
@@ -322,7 +322,7 @@ function LibraryView() {
                                     {expandedUrl === policy.url && (
                                         <tr className="library-detail-row">
                                             <td colSpan={TOTAL_COLUMN_COUNT}>
-                                                <SavedPolicy policy={policy} />
+                                                <SavedPolicy policy={policy} isAdmin />
                                             </td>
                                         </tr>
                                     )}

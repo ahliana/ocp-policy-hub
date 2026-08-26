@@ -1,4 +1,4 @@
-"""Agent endpoints — REST and WebSocket for the standalone policy agent."""
+"""Agent endpoints - REST and WebSocket for the standalone policy agent."""
 
 import os
 import logging
@@ -9,6 +9,12 @@ from pydantic import BaseModel
 
 from ...agent.orchestrator import PolicyAgent
 from ...core.models import DEFAULT_ANALYSIS_MODEL
+from ..deps import is_loopback_client
+
+# WebSocket close code for an admin-gate rejection (RFC 6455 policy
+# violation) - distinguishes a gate rejection from an unrelated close
+# (e.g. missing ANTHROPIC_API_KEY) for any client inspecting the code.
+_POLICY_VIOLATION = 1008
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +93,17 @@ async def agent_websocket(ws: WebSocket):
     """
     await ws.accept()
 
-    # Admin gate: websockets bypass the HTTP middleware, so the chat
-    # (which spends API budget) checks the token itself via ?token=.
+    # Admin gate: websockets bypass AdminGateMiddleware, so the chat
+    # (which spends API budget) checks admin status itself here - the same
+    # admin/non-admin line request_is_admin (src/api/deps.py) uses for HTTP
+    # requests. ADMIN_TOKEN set: only a matching ?token= query param counts
+    # (browsers can't easily set custom headers on a WebSocket upgrade, so
+    # this stays a query param rather than switching to request_is_admin's
+    # X-Admin-Token header). ADMIN_TOKEN unset: loopback-only, via the same
+    # is_loopback_client fallback request_is_admin uses - previously this
+    # branch didn't exist at all (`if admin_token:` skipped straight past
+    # the whole check), so an unset token left this endpoint fully open to
+    # any remote caller.
     admin_token = os.environ.get("ADMIN_TOKEN")
     if admin_token:
         import hmac
@@ -97,8 +112,20 @@ async def agent_websocket(ws: WebSocket):
             await ws.send_json(
                 {"type": "error", "content": "Administrator token required"}
             )
-            await ws.close()
+            await ws.close(code=_POLICY_VIOLATION)
             return
+    elif not is_loopback_client(ws):
+        await ws.send_json(
+            {
+                "type": "error",
+                "content": (
+                    "This server has no ADMIN_TOKEN configured, so admin "
+                    "actions are restricted to local requests."
+                ),
+            }
+        )
+        await ws.close(code=_POLICY_VIOLATION)
+        return
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:

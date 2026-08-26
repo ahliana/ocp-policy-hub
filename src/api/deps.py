@@ -19,6 +19,22 @@ LOOPBACK_HOSTS = {"127.0.0.1", "::1"}
 TESTCLIENT_HOST = "testclient"
 
 
+def is_loopback_client(connection) -> bool:
+    """Loopback-only fallback shared by request_is_admin and any other
+    ADMIN_TOKEN-unset gate (currently: the agent chat WebSocket).
+
+    ``connection`` is anything exposing Starlette's ``.headers``/``.client``
+    shape - both ``Request`` and ``WebSocket`` qualify. A forwarded header
+    means the request traversed a reverse proxy, so a loopback TCP peer is
+    the proxy itself, not the operator, and counts as remote.
+    """
+    forwarded = connection.headers.get("x-forwarded-for") or connection.headers.get("x-real-ip")
+    if forwarded:
+        return False
+    host = connection.client.host if connection.client else ""
+    return host in LOOPBACK_HOSTS or host == TESTCLIENT_HOST
+
+
 def request_is_admin(request) -> bool:
     """Whether this request should be treated as an administrator.
 
@@ -26,20 +42,14 @@ def request_is_admin(request) -> bool:
     routes that clamp public visibility (policies/coverage) can use the same
     admin/non-admin line. ADMIN_TOKEN set: only a matching X-Admin-Token
     header counts, full stop. ADMIN_TOKEN unset: same loopback-only open-mode
-    semantics as the middleware - a forwarded header means the request
-    traversed a reverse proxy, so a loopback TCP peer is the proxy itself,
-    not the operator, and counts as remote.
+    semantics as the middleware - see is_loopback_client.
     """
     token = os.environ.get("ADMIN_TOKEN")
     if token:
         provided = request.headers.get("x-admin-token", "")
         return hmac.compare_digest(provided, token)
 
-    forwarded = request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip")
-    if forwarded:
-        return False
-    host = request.client.host if request.client else ""
-    return host in LOOPBACK_HOSTS or host == TESTCLIENT_HOST
+    return is_loopback_client(request)
 
 
 # get_config()/get_scan_manager() used to be plain @lru_cache singletons.

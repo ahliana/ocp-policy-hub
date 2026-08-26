@@ -220,16 +220,47 @@ class TestAnalysisRoutes:
         assert response.status_code == 422
 
     def test_analyze_url_fetch_failure_returns_status(self, client):
+        # Literal public IP exercises the real SSRF guard without DNS.
         with patch("src.api.routes.analysis.AsyncCrawler") as crawler_cls:
             crawler = crawler_cls.return_value
             crawler.crawl_domain = AsyncMock(return_value=[])
             crawler.close = AsyncMock()
             response = client.post(
-                "/api/analyze", json={"url": "https://example.gov/policy"}
+                "/api/analyze", json={"url": "https://8.8.8.8/policy"}
             )
         assert response.status_code == 200
         data = response.json()
         assert data["crawl_status"] == "fetch_failed"
+
+    def test_analyze_rejects_private_url_without_crawling(self, client):
+        """SSRF guard: /api/analyze is admin-gated already, but a rejected
+        URL must never reach AsyncCrawler - defense in depth."""
+        with patch("src.api.routes.analysis.AsyncCrawler") as crawler_cls:
+            response = client.post(
+                "/api/analyze", json={"url": "http://127.0.0.1/admin"}
+            )
+        assert response.status_code == 400
+        assert "public http" in response.json()["detail"]
+        crawler_cls.assert_not_called()
+
+    def test_analyze_rejects_non_http_scheme_without_crawling(self, client):
+        with patch("src.api.routes.analysis.AsyncCrawler") as crawler_cls:
+            response = client.post(
+                "/api/analyze", json={"url": "javascript:alert(1)"}
+            )
+        assert response.status_code == 400
+        crawler_cls.assert_not_called()
+
+    def test_analyze_allows_public_url_and_crawls(self, client):
+        with patch("src.api.routes.analysis.AsyncCrawler") as crawler_cls:
+            crawler = crawler_cls.return_value
+            crawler.crawl_domain = AsyncMock(return_value=[])
+            crawler.close = AsyncMock()
+            response = client.post(
+                "/api/analyze", json={"url": "https://8.8.8.8/policy"}
+            )
+        assert response.status_code == 200
+        crawler_cls.assert_called_once()
 
     def test_root_listing_matches_registered_routes(self, client):
         """Every endpoint advertised at / must actually be registered."""

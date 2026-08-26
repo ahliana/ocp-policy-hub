@@ -1,45 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { apiUrl } from '../config/api';
-
-const URL_PATTERN = /(https?:\/\/[^\s)]+)/g;
-
-// Split an answer into text/link descriptors so URLs render as real
-// links without dangerouslySetInnerHTML.
-export function linkifyAnswer(text) {
-  const parts = [];
-  let lastIndex = 0;
-  for (const match of text.matchAll(URL_PATTERN)) {
-    if (match.index > lastIndex) {
-      parts.push({ type: 'text', value: text.slice(lastIndex, match.index) });
-    }
-    parts.push({ type: 'link', value: match[0] });
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < text.length) {
-    parts.push({ type: 'text', value: text.slice(lastIndex) });
-  }
-  return parts;
-}
+import { renderMiniMarkdown } from '../utils/miniMarkdown';
 
 function AnswerText({ answer }) {
   return (
     <div className="ask-box-answer" role="region" aria-label="Answer">
-      {answer.split('\n').map((line, lineIndex) => (
-        // eslint-disable-next-line react/no-array-index-key
-        <p key={lineIndex}>
-          {linkifyAnswer(line).map((part, partIndex) =>
-            part.type === 'link' ? (
-              // eslint-disable-next-line react/no-array-index-key
-              <a key={partIndex} href={part.value} target="_blank" rel="noopener noreferrer">
-                {part.value}
-              </a>
-            ) : (
-              // eslint-disable-next-line react/no-array-index-key
-              <span key={partIndex}>{part.value}</span>
-            )
-          )}
-        </p>
-      ))}
+      {renderMiniMarkdown(answer)}
     </div>
   );
 }

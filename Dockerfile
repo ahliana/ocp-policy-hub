@@ -39,14 +39,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
+COPY pyproject.toml constraints.txt ./
 COPY src/ ./src/
 COPY config/ ./config/
 
 # The crawler needs a real browser for JS-rendered sites (see
 # src/core/crawler.py); scans run inside this container, so the image
 # accepts the Chromium size cost rather than requiring a host install.
-RUN pip install --no-cache-dir ".[browser]" \
+# constraints.txt pins every dependency to the version last verified in
+# dev (see that file's header for how to regenerate it) so a rebuild
+# can't silently pick up a new transitive version.
+RUN pip install --no-cache-dir ".[browser]" -c constraints.txt \
     && playwright install --with-deps chromium \
     && chmod -R a+rX /ms-playwright
 

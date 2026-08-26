@@ -1,22 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import AskPolicyBox, { linkifyAnswer } from './AskPolicyBox';
-
-describe('linkifyAnswer', () => {
-  it('turns bare URLs into anchor descriptors', () => {
-    const parts = linkifyAnswer('See https://ec.europa.eu/law for details.');
-    expect(parts).toEqual([
-      { type: 'text', value: 'See ' },
-      { type: 'link', value: 'https://ec.europa.eu/law' },
-      { type: 'text', value: ' for details.' },
-    ]);
-  });
-
-  it('returns plain text untouched', () => {
-    expect(linkifyAnswer('No policies found.')).toEqual([
-      { type: 'text', value: 'No policies found.' },
-    ]);
-  });
-});
+import AskPolicyBox from './AskPolicyBox';
 
 describe('AskPolicyBox busy feedback', () => {
   afterEach(() => {
@@ -50,6 +33,36 @@ describe('AskPolicyBox busy feedback', () => {
       resolveFetch({ ok: true, json: async () => ({ answer: 'Sweden requires reporting.' }) });
     });
     expect(screen.getByText(/Sweden requires reporting/)).toBeInTheDocument();
+  });
+});
+
+describe('AskPolicyBox markdown rendering', () => {
+  beforeEach(() => {
+    global.fetch = jest.fn();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('renders Markdown headings and bold as formatted elements, not literal syntax', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ answer: '## Germany\n**Heat reuse** is mandatory.' }),
+    });
+
+    render(<AskPolicyBox />);
+    fireEvent.change(screen.getByPlaceholderText(/ask about discovered policies/i), {
+      target: { value: 'What does Germany require?' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /ask/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 2, name: 'Germany' })).toBeInTheDocument();
+    });
+    expect(screen.getByText('Heat reuse').tagName).toBe('STRONG');
+    expect(screen.queryByText(/##/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\*\*/)).not.toBeInTheDocument();
   });
 });
 

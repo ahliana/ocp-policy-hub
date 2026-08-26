@@ -77,7 +77,7 @@ const UPCOMING_LIFECYCLE_STAGES = new Set([
     'proposed', 'consultation', 'in_committee', 'passed', 'transposition_notified',
 ]);
 
-// Friendly reader-facing text for the review workflow's internal statuses —
+// Friendly reader-facing text for the review workflow's internal statuses -
 // "new"/"promoted" read as jargon to a visitor who isn't part of the review
 // process (see WP-3 "public review visibility").
 const REVIEW_STATUS_LABELS = {
@@ -89,6 +89,17 @@ const REVIEW_STATUS_LABELS = {
 
 function formatReviewStatusLabel(status) {
     return REVIEW_STATUS_LABELS[status] || status;
+}
+
+const CURATED_DOMAIN_ID = 'curated_master_tab';
+
+// Curated master records carry relevance_score 0 to mean "not applicable -
+// hand-verified", not "irrelevant" - showing "0 relevance" on exactly the
+// most-trusted records reads backwards. Any record with no real score
+// (falsy relevance_score) gets the same "Curated" treatment, since a bare
+// 0/null score means the same thing everywhere: no automated score applies.
+function isCuratedRelevance(policy) {
+    return policy.domain_id === CURATED_DOMAIN_ID || !policy.relevance_score;
 }
 
 function getLifecycleBadgeStyle(stage) {
@@ -139,7 +150,7 @@ export function getPolicyTags(policy, tags) {
     return [...new Set([...explicitTags, ...inferredTags])].slice(0, 8);
 }
 
-function SavedPolicy({ policy, tags = {} }) {
+function SavedPolicy({ policy, tags = {}, isAdmin = false }) {
     const [isExpanded, setIsExpanded] = useState(false);
     const detailsId = useId();
 
@@ -220,8 +231,14 @@ function SavedPolicy({ policy, tags = {} }) {
                     )}
                 </span>
                 <span className="saved-policy-score">
-                    <span className="relevance-score">{policy.relevance_score}</span>
-                    <span className="score-label">relevance</span>
+                    {isCuratedRelevance(policy) ? (
+                        <span className="relevance-score relevance-curated">Curated</span>
+                    ) : (
+                        <>
+                            <span className="relevance-score">{policy.relevance_score}</span>
+                            <span className="score-label">relevance</span>
+                        </>
+                    )}
                 </span>
                 <span className="expand-button" aria-hidden="true">
                     {isExpanded ? '-' : '+'}
@@ -310,22 +327,24 @@ function SavedPolicy({ policy, tags = {} }) {
                         </div>
                     )}
 
-                    <div className="detail-section meta-info">
-                        <dl className="detail-list">
-                            <dt>Scan ID:</dt>
-                            <dd className="monospace">{policy.scan_id}</dd>
-                            <dt>Domain ID:</dt>
-                            <dd className="monospace">{policy.domain_id}</dd>
-                            <dt>Crawl Status:</dt>
-                            <dd>{policy.crawl_status}</dd>
-                            {policy.error_details && (
-                                <>
-                                    <dt>Error Details:</dt>
-                                    <dd>{policy.error_details}</dd>
-                                </>
-                            )}
-                        </dl>
-                    </div>
+                    {isAdmin && (
+                        <div className="detail-section meta-info">
+                            <dl className="detail-list">
+                                <dt>Scan ID:</dt>
+                                <dd className="monospace">{policy.scan_id}</dd>
+                                <dt>Domain ID:</dt>
+                                <dd className="monospace">{policy.domain_id}</dd>
+                                <dt>Crawl Status:</dt>
+                                <dd>{policy.crawl_status}</dd>
+                                {policy.error_details && (
+                                    <>
+                                        <dt>Error Details:</dt>
+                                        <dd>{policy.error_details}</dd>
+                                    </>
+                                )}
+                            </dl>
+                        </div>
+                    )}
 
                     <div className="detail-section actions">
                         <a

@@ -47,7 +47,14 @@ function compareText(firstValue, secondValue) {
   return String(firstValue || '').localeCompare(String(secondValue || ''));
 }
 
-function PolicyList({ externalPlace = null, publicView = 'all' }) {
+function PolicyList({
+  externalPlace = null, publicView = 'all', adminRequired = false, hasAdminToken = false,
+}) {
+  // Same "unlocked" rule as AgentPanel: a local single-user deployment (no
+  // ADMIN_TOKEN set) sees admin-only card details too, otherwise it takes a
+  // signed-in admin token.
+  const isAdmin = !adminRequired || hasAdminToken;
+
   const [policies, setPolicies] = useState([]);
   const [tags, setTags] = useState({});
   const [selectedJurisdictions, setSelectedJurisdictions] = useState([]);
@@ -471,6 +478,7 @@ function PolicyList({ externalPlace = null, publicView = 'all' }) {
               key={policyKey}
               policy={policy}
               tags={tags}
+              isAdmin={isAdmin}
             />
           ))}
         </div>

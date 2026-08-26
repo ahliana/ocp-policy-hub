@@ -20,6 +20,11 @@
   --wm-map-bin3: #55831f;
   --wm-map-stroke: #ffffff;
   --wm-map-hover-stroke: #1c2318;
+  /* Deliberately blue - every other stroke/accent on this map lives in the
+     green choropleth family, so a keyboard focus ring needs a hue nothing
+     else uses to stay visible over any bin fill (untracked, tracked, or any
+     of the three intensities) and over water. */
+  --wm-focus-ring: #1d4ed8;
   --wm-tooltip-bg: #1c2318;
   --wm-tooltip-ink: #f2f5ee;
   /* Federal/nationwide: deliberately a different hue (indigo) from the
@@ -56,6 +61,7 @@
     --wm-map-bin3: #9bd44a;
     --wm-map-stroke: #141812;
     --wm-map-hover-stroke: #e8ece3;
+    --wm-focus-ring: #93c5fd;
     --wm-tooltip-bg: #e8ece3;
     --wm-tooltip-ink: #1c2318;
     --wm-federal-bg: #23264a;
@@ -171,6 +177,10 @@
   border-radius: 8px;
   padding: 3px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+  /* The card itself never intercepts taps - only the buttons inside it do
+     (restored below). That way any padding/gap inside the cluster passes
+     taps straight through to the map underneath instead of dead-zoning it. */
+  pointer-events: none;
 }
 
 .wm-control-btn {
@@ -189,6 +199,7 @@
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.15s ease;
+  pointer-events: auto;
 }
 
 .wm-control-btn:hover:not(:disabled) {
@@ -247,6 +258,20 @@
 .wm-country.wm-hit {
   stroke: var(--wm-map-hover-stroke);
   stroke-width: 1.1;
+}
+
+/* Visible keyboard focus (WCAG 2.4.7) for every country/admin-1 path -
+   ~200 elements with role="button" tabindex="0" and outline:none above, so
+   without this a keyboard user tabbing across the map sees nothing. A
+   dedicated blue stroke (not the green/ink hover color) plus a wider,
+   non-scaling stroke keeps it legible over every choropleth fill and over
+   water alike, whether the path is focused, hovered, hit, or dimmed by an
+   active legend filter. Stroke doesn't affect layout, and no animation is
+   added so prefers-reduced-motion needs nothing extra here. */
+svg path[role="button"]:focus-visible {
+  stroke: var(--wm-focus-ring);
+  stroke-width: 2.5;
+  opacity: 1;
 }
 
 .wm-country.wm-dim,
@@ -731,4 +756,18 @@
   .wm-stat b { font-size: 20px; }
   .wm-panel { width: 100%; }
   .wm-country-view .wm-svg { max-height: 50vh; }
+
+  /* At mobile widths the map shrinks enough that an absolutely-positioned
+     top-left overlay can sit directly on top of tappable countries (e.g.
+     Germany, the US) and steal their taps. Take the controls out of the
+     overlay entirely: back to normal flow, centered below the map, where
+     they stay fully visible and usable without ever covering the map. The
+     controls already render after the map <svg> in the DOM (see
+     WorldMap.js), so this stacks them below it. */
+  .wm-controls {
+    position: static;
+    justify-content: center;
+    width: fit-content;
+    margin: 8px auto 0;
+  }
 }

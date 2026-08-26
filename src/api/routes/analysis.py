@@ -1,4 +1,4 @@
-"""Single URL analysis endpoint — full pipeline on one URL."""
+"""Single URL analysis endpoint - full pipeline on one URL."""
 
 import os
 
@@ -12,6 +12,7 @@ from ...core.keywords import build_keyword_matcher
 from ...core.llm import ClaudeClient, LLMError
 from ...core.log_setup import log_audit_event
 from ...core.models import AnalyzeRequest
+from ...core.url_safety import is_public_http_url
 from ...core.verifier import Verifier
 from ...storage.store import PolicyStore
 
@@ -36,6 +37,17 @@ async def run_url_analysis(
     Shared by the /analyze endpoint and lead chasing.
     """
     settings = config.settings
+
+    # SSRF guard: only fetch public http(s) addresses. /api/analyze is
+    # admin-gated already, but the endpoint accepts an arbitrary
+    # caller-supplied URL, so this is defense-in-depth against a
+    # compromised/careless admin session being steered at internal
+    # services (mirrors the same guard on the tips chase flow, leads.py).
+    if not is_public_http_url(url):
+        raise HTTPException(
+            status_code=400,
+            detail="URL is not a public http(s) address; refusing to fetch.",
+        )
 
     # 1. Fetch
     crawler = AsyncCrawler(
@@ -156,7 +168,7 @@ async def run_url_analysis(
         finally:
             await llm.close()
     elif not api_key:
-        response["llm_note"] = "No ANTHROPIC_API_KEY set — LLM analysis skipped"
+        response["llm_note"] = "No ANTHROPIC_API_KEY set - LLM analysis skipped"
 
     return response
 

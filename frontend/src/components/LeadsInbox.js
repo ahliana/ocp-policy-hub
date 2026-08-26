@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Tooltip from '@mui/material/Tooltip';
 import { apiUrl } from '../config/api';
 import { adminHeaders } from '../utils/adminAuth';
+import { cleanTipText } from '../utils/plainText';
 
 function formatWhen(isoString) {
     if (!isoString) return '';
@@ -9,8 +10,20 @@ function formatWhen(isoString) {
     return Number.isNaN(parsed.getTime()) ? '' : parsed.toLocaleString();
 }
 
+const UNTITLED_FALLBACK = 'Untitled source';
+
+// Cleans a tip's title for display, falling back to a cleaned second field
+// (a note or the source URL) when the title itself has nothing readable in
+// it - e.g. a Google News RSS item with no title but a note, or a bare
+// redirect URL with neither.
+function cleanCardTitle(title, fallbackRaw) {
+    const cleanedTitle = cleanTipText(title, '');
+    if (cleanedTitle) return cleanedTitle;
+    return cleanTipText(fallbackRaw, UNTITLED_FALLBACK);
+}
+
 // User-facing vocabulary is "Tips" (this file keeps its LeadsInbox name and
-// talks to /api/tips — see src/api/routes/leads.py for the API-side mapping
+// talks to /api/tips - see src/api/routes/leads.py for the API-side mapping
 // between the public "tip" vocabulary and the internal Lead/LeadStore
 // storage layer).
 function LeadsInbox({ adminRequired = false, hasAdminToken = false }) {
@@ -79,7 +92,7 @@ function LeadsInbox({ adminRequired = false, hasAdminToken = false }) {
 
             if (response.status === 429) {
                 const errorBody = await response.json().catch(() => ({}));
-                setSuggestMessage(errorBody.detail || 'Too many tips submitted — please try again shortly.');
+                setSuggestMessage(errorBody.detail || 'Too many tips submitted - please try again shortly.');
                 return;
             }
 
@@ -196,7 +209,9 @@ function LeadsInbox({ adminRequired = false, hasAdminToken = false }) {
                                     <li key={lead.lead_id} className="leads-card">
                                         <div className="leads-card-header">
                                             {isNoteOnly ? (
-                                                <span className="leads-card-title">{lead.title || lead.snippet}</span>
+                                                <span className="leads-card-title">
+                                                    {cleanCardTitle(lead.title, lead.snippet)}
+                                                </span>
                                             ) : (
                                                 <a
                                                     href={lead.source_url}
@@ -204,7 +219,7 @@ function LeadsInbox({ adminRequired = false, hasAdminToken = false }) {
                                                     rel="noopener noreferrer"
                                                     className="leads-card-title"
                                                 >
-                                                    {lead.title || lead.source_url}
+                                                    {cleanCardTitle(lead.title, lead.source_url)}
                                                 </a>
                                             )}
                                             <div className="leads-chips">
@@ -222,7 +237,7 @@ function LeadsInbox({ adminRequired = false, hasAdminToken = false }) {
                                             </div>
                                         </div>
                                         {!isNoteOnly && lead.snippet && (
-                                            <p className="leads-snippet">{lead.snippet}</p>
+                                            <p className="leads-snippet">{cleanTipText(lead.snippet, '')}</p>
                                         )}
                                         {lead.status === 'chased' && (
                                             lead.policy_url ? (
@@ -244,7 +259,7 @@ function LeadsInbox({ adminRequired = false, hasAdminToken = false }) {
                                             <p className="leads-outcome leads-outcome-failed">
                                                 Chase attempt failed
                                                 {lead.chased_at && ` (on ${formatWhen(lead.chased_at)})`}:{' '}
-                                                {lead.chase_error || 'unknown error'} — still chaseable.
+                                                {lead.chase_error || 'unknown error'} - still chaseable.
                                             </p>
                                         )}
                                         <div className="leads-actions">

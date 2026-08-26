@@ -469,3 +469,36 @@ describe('PolicyList public review visibility', () => {
     }, { timeout: 2000 });
   });
 });
+
+describe('PolicyList admin meta visibility (pipeline internals on cards)', () => {
+  async function expandFirstCard() {
+    await screen.findByText('Federal Heat Reuse Act');
+    fireEvent.click(screen.getByRole('button', { name: /Federal Heat Reuse Act/ }));
+  }
+
+  it('hides pipeline meta (Scan ID/Domain ID/Crawl Status) from a public viewer when admin auth is required', async () => {
+    global.fetch = mockFetch();
+    render(<PolicyList adminRequired hasAdminToken={false} />);
+    await expandFirstCard();
+
+    expect(screen.queryByText('Scan ID:')).not.toBeInTheDocument();
+    expect(screen.queryByText('s1')).not.toBeInTheDocument();
+  });
+
+  it('shows pipeline meta to a signed-in admin when admin auth is required', async () => {
+    global.fetch = mockFetch();
+    render(<PolicyList adminRequired hasAdminToken />);
+    await expandFirstCard();
+
+    expect(screen.getByText('Scan ID:')).toBeInTheDocument();
+    expect(screen.getByText('s1')).toBeInTheDocument();
+  });
+
+  it('shows pipeline meta when no admin auth is configured at all (adminRequired false)', async () => {
+    global.fetch = mockFetch();
+    render(<PolicyList />);
+    await expandFirstCard();
+
+    expect(screen.getByText('Scan ID:')).toBeInTheDocument();
+  });
+});
