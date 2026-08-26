@@ -40,9 +40,13 @@ jobs:
           cache: pip
 
       - name: Install
+        # -c constraints.txt: resolve to the exact versions verified in dev
+        # (same contract as the Dockerfile). Without it, CI installs the
+        # newest ruff and lints under rules nobody ran locally - the first
+        # CI run failed exactly that way (ruff 0.16.4 vs the pinned 0.15.20).
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,browser]"
+          pip install -e ".[dev,browser]" -c constraints.txt
 
       - name: Lint
         run: ruff check src/ tests/
