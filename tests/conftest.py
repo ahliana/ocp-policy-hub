@@ -7,6 +7,9 @@ configured). Strip the ambient config by default; tests that need a value set
 it themselves via monkeypatch.setenv.
 """
 
+import sys
+from pathlib import Path
+
 import pytest
 
 # Env vars a developer may have in .env that tests assume are unset unless the
@@ -24,10 +27,9 @@ def _no_ambient_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 # Proofmark size taxonomy: importing the autouse fixture registers it
-# suite-wide. The plugin lives in gates/ (distributed file, never edited here).
-import sys as _pm_sys
-from pathlib import Path as _PmPath
-_pm_gates = str(_PmPath(__file__).resolve().parents[1] / "gates")
-if _pm_gates not in _pm_sys.path:
-    _pm_sys.path.insert(0, _pm_gates)
+# suite-wide. The plugin lives in gates/ (distributed file, never edited here),
+# so gates/ must be on sys.path before the import - hence the noqa'd position.
+_pm_gates = str(Path(__file__).resolve().parents[1] / "gates")
+if _pm_gates not in sys.path:
+    sys.path.insert(0, _pm_gates)
 from proofmark_sizes import _proofmark_size_guard  # noqa: E402,F401
