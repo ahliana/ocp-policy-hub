@@ -30,6 +30,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
+    "pytest-socket>=0.8.0",  # enforces the no-network claim of `small`-marked tests
     "ruff>=0.4.0",
     "httpx",  # for TestClient
 ]
@@ -44,6 +45,12 @@ packages = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "small: hermetic - no network (enforced via pytest-socket), no real clock, no data/",
+    "medium: may touch localhost and tmp_path",
+    "large: slow; excluded from the pre-commit fast run, always runs at push",
+    "e2e: end-to-end through a running stack",
+]
 
 [tool.ruff]
 target-version = "py311"

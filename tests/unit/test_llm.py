@@ -461,6 +461,7 @@ def _make_screening_response(relevant: bool = True, confidence: int = 7):
     return response
 
 
+@pytest.mark.large  # real-sleep backoff timing: ~40s for the class
 class TestScreeningRateLimitRetry:
     """Verify that screen_relevance retries on 429 instead of failing open."""
 

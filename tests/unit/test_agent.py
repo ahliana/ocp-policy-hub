@@ -222,6 +222,7 @@ def _make_text_response(text: str):
     return response
 
 
+@pytest.mark.large  # real-sleep backoff timing: ~70s for the class
 class TestAgentRateLimitRetry:
     """Test that the agent loop retries on rate limit errors."""
 
