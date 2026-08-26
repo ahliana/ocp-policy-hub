@@ -41,6 +41,12 @@ class Auditor:
     def __init__(self, api_key: str, model: str = DEFAULT_ANALYSIS_MODEL):
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
         self.model = model
+        # Set by generate_advisory() on a successful call (WP-22) so
+        # ScanManager can price and add this call's tokens into the scan's
+        # recorded actuals. Stay None if the auditor never runs or its call
+        # fails - callers must treat None as "nothing to add".
+        self.last_input_tokens: Optional[int] = None
+        self.last_output_tokens: Optional[int] = None
 
     async def generate_advisory(
         self,
@@ -62,6 +68,10 @@ class Auditor:
                 temperature=0.3,
                 messages=[{"role": "user", "content": prompt}],
             )
+
+            if hasattr(response, "usage"):
+                self.last_input_tokens = response.usage.input_tokens
+                self.last_output_tokens = response.usage.output_tokens
 
             return response.content[0].text
 

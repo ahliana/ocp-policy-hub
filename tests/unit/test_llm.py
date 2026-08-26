@@ -14,6 +14,7 @@ from src.core.models import (
     PolicyAnalysis, PolicyType, CostInfo,
     DEFAULT_ANALYSIS_MODEL, DEFAULT_SCREENING_MODEL,
 )
+from src.core.pricing import PricingLoader
 
 
 # --- _extract_json ---
@@ -318,33 +319,139 @@ class TestToPolicy:
 # --- ClaudeClient.update_cost_estimate ---
 
 class TestUpdateCostEstimate:
-    def test_cost_with_both_models(self):
+    """WP-22: exact per-stage pricing, no call-count-fraction blend."""
+
+    def _client(self, **cost_kwargs):
         client = ClaudeClient.__new__(ClaudeClient)
-        client.cost = CostInfo(
-            input_tokens=100_000,
-            output_tokens=10_000,
+        client.screening_model = DEFAULT_SCREENING_MODEL
+        client.analysis_model = DEFAULT_ANALYSIS_MODEL
+        client.cost = CostInfo(**cost_kwargs)
+        from src.core.pricing import PricingLoader
+        client._pricing = PricingLoader()
+        return client
+
+    @pytest.mark.small
+    def test_cost_with_both_stages(self):
+        client = self._client(
             screening_calls=50,
             analysis_calls=10,
+            screening_input_tokens=100_000,
+            screening_output_tokens=2_500,
+            analysis_input_tokens=200_000,
+            analysis_output_tokens=10_000,
         )
         client.update_cost_estimate()
         assert client.cost.total_usd > 0
 
+    @pytest.mark.small
     def test_cost_with_only_analysis(self):
-        client = ClaudeClient.__new__(ClaudeClient)
-        client.cost = CostInfo(
-            input_tokens=50_000,
-            output_tokens=5_000,
-            screening_calls=0,
+        client = self._client(
             analysis_calls=5,
+            analysis_input_tokens=50_000,
+            analysis_output_tokens=5_000,
         )
         client.update_cost_estimate()
         assert client.cost.total_usd > 0
 
+    @pytest.mark.small
     def test_cost_zero_tokens(self):
-        client = ClaudeClient.__new__(ClaudeClient)
-        client.cost = CostInfo()
+        client = self._client()
         client.update_cost_estimate()
         assert client.cost.total_usd == 0
+
+    @pytest.mark.small
+    def test_cost_is_exact_not_a_call_count_blend(self):
+        """Regression: the old formula blended input_tokens/output_tokens
+        (the combined pool) by screening_calls/analysis_calls fraction. A
+        scenario with few calls carrying huge screening token counts and
+        many calls carrying tiny analysis token counts makes the old blend
+        (call-count-weighted) diverge sharply from the exact per-stage
+        price — assert the exact answer, not the blend's."""
+        pricing = PricingLoader()
+        haiku = pricing.pricing_for(DEFAULT_SCREENING_MODEL)
+        sonnet = pricing.pricing_for(DEFAULT_ANALYSIS_MODEL)
+
+        screening_input, screening_output = 1_000_000, 50_000
+        analysis_input, analysis_output = 1_000, 100
+
+        client = self._client(
+            screening_calls=1,
+            analysis_calls=99,
+            screening_input_tokens=screening_input,
+            screening_output_tokens=screening_output,
+            analysis_input_tokens=analysis_input,
+            analysis_output_tokens=analysis_output,
+        )
+        client.update_cost_estimate()
+
+        exact = round(
+            haiku.cost_usd(screening_input, screening_output)
+            + sonnet.cost_usd(analysis_input, analysis_output),
+            4,
+        )
+
+        # The old blend priced ALL tokens (screening + analysis combined)
+        # at haiku_frac/sonnet_frac of the call counts (1/100 haiku,
+        # 99/100 sonnet) — wildly different from pricing each stage's own
+        # tokens at its own model.
+        total_input = screening_input + analysis_input
+        total_output = screening_output + analysis_output
+        haiku_frac = 1 / 100
+        sonnet_frac = 99 / 100
+        old_blend = round(
+            total_input * (haiku_frac * haiku.input_per_mtok
+                           + sonnet_frac * sonnet.input_per_mtok) / 1_000_000
+            + total_output * (haiku_frac * haiku.output_per_mtok
+                              + sonnet_frac * sonnet.output_per_mtok) / 1_000_000,
+            4,
+        )
+
+        assert client.cost.total_usd == exact
+        assert client.cost.total_usd != old_blend
+
+    @pytest.mark.small
+    def test_screening_priced_at_screening_model_analysis_at_analysis_model(self):
+        pricing = PricingLoader()
+        haiku = pricing.pricing_for(DEFAULT_SCREENING_MODEL)
+        sonnet = pricing.pricing_for(DEFAULT_ANALYSIS_MODEL)
+
+        client = self._client(
+            screening_input_tokens=10_000, screening_output_tokens=200,
+            analysis_input_tokens=20_000, analysis_output_tokens=1_000,
+        )
+        client.update_cost_estimate()
+
+        expected = round(
+            haiku.cost_usd(10_000, 200) + sonnet.cost_usd(20_000, 1_000), 4,
+        )
+        assert client.cost.total_usd == expected
+
+    @pytest.mark.medium
+    def test_reacts_to_monkeypatched_pricing_table(self, tmp_path):
+        """Both stages must actually consult the pricing table, not a
+        constant baked into the function."""
+        (tmp_path / "pricing.yaml").write_text(
+            "models:\n"
+            f"  {DEFAULT_SCREENING_MODEL}:\n"
+            "    input_per_mtok: 1000.0\n"
+            "    output_per_mtok: 1000.0\n"
+            f"  {DEFAULT_ANALYSIS_MODEL}:\n"
+            "    input_per_mtok: 1000.0\n"
+            "    output_per_mtok: 1000.0\n"
+            "estimator: {}\n",
+            encoding="utf-8",
+        )
+        client = self._client(
+            screening_input_tokens=1_000, screening_output_tokens=0,
+            analysis_input_tokens=1_000, analysis_output_tokens=0,
+        )
+        from src.core.pricing import PricingLoader as _PL
+        client._pricing = _PL(config_dir=str(tmp_path))
+
+        client.update_cost_estimate()
+
+        # 1000 tokens * $1000/Mtok = $1 per stage, two stages = $2
+        assert client.cost.total_usd == pytest.approx(2.0)
 
 
 # --- Prompt content tests ---

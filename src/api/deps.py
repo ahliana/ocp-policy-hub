@@ -186,5 +186,6 @@ def get_scan_manager() -> ScanManager:
             api_key=api_key,
             data_dir=data_dir,
             domain_overrides_store=get_domain_overrides_store(),
+            scan_history_store=get_scan_history_store(),
         )
     return _scan_manager_state["instance"]

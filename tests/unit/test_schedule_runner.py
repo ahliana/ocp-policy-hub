@@ -24,11 +24,13 @@ class FakeManager:
         self.start_scan = AsyncMock(side_effect=self._default_start_scan)
         self.start_scan_calls: list[dict] = []
 
-    def _default_start_scan(self, domains_group, deep=False, channels=None, category=None):
+    def _default_start_scan(
+        self, domains_group, deep=False, channels=None, category=None, budget_usd=None,
+    ):
         scan_id = f"scan-{len(self.start_scan_calls)}"
         self.start_scan_calls.append({
             "domains_group": domains_group, "deep": deep,
-            "channels": channels, "category": category,
+            "channels": channels, "category": category, "budget_usd": budget_usd,
         })
         job = ScanJob(scan_id=scan_id, status=ScanStatus.RUNNING, domain_group=domains_group)
         self._jobs[scan_id] = job
@@ -275,10 +277,14 @@ class TestResilience:
 
         manager = FakeManager()
 
-        async def side_effect(domains_group, deep=False, channels=None, category=None):
+        async def side_effect(
+            domains_group, deep=False, channels=None, category=None, budget_usd=None,
+        ):
             if domains_group == "bad-scope":
                 raise RuntimeError("boom")
-            return manager._default_start_scan(domains_group, deep, channels, category)
+            return manager._default_start_scan(
+                domains_group, deep, channels, category, budget_usd,
+            )
 
         manager.start_scan = AsyncMock(side_effect=side_effect)
 
@@ -344,6 +350,53 @@ class TestClaimGuard:
 
         manager.start_scan.assert_awaited_once()
         assert manager.start_scan.await_count == 1
+
+
+@pytest.mark.medium
+class TestBudgetPassedToStartScan:
+    """WP-22b: fire_schedule() computes remaining budget (ceiling -
+    month_spend) BEFORE firing and passes it through to start_scan, so a
+    scan can stop itself once it reaches what's left of the monthly cap.
+    """
+
+    @pytest.mark.asyncio
+    async def test_remaining_budget_passed_when_ceiling_set(self, store, data_dir):
+        now = datetime(2026, 1, 5, 6, 0)
+        _due_schedule(store, now, domains="quick", monthly_ceiling_usd=100.0)
+        store._conn.execute(
+            "INSERT INTO scans (scan_id, domain_group, status, completed_at, cost_usd) "
+            "VALUES (?, ?, 'completed', ?, ?)",
+            ("s1", "quick", "2026-01-01T00:00:00", 40.0),
+        )
+        store._conn.commit()
+        manager = FakeManager()
+
+        await run_due_schedules(manager, store, data_dir=data_dir, now=now)
+
+        assert manager.start_scan_calls[0]["budget_usd"] == pytest.approx(60.0)
+
+    @pytest.mark.asyncio
+    async def test_budget_is_none_when_no_ceiling(self, store, data_dir):
+        now = datetime(2026, 1, 5, 6, 0)
+        _due_schedule(store, now, domains="quick", monthly_ceiling_usd=None)
+        manager = FakeManager()
+
+        await run_due_schedules(manager, store, data_dir=data_dir, now=now)
+
+        assert manager.start_scan_calls[0]["budget_usd"] is None
+
+    @pytest.mark.asyncio
+    async def test_fire_schedule_direct_passes_remaining_budget(self, store, data_dir):
+        now = datetime(2026, 1, 5, 6, 0)
+        schedule = store.create(
+            name="Manual", domains="quick", channels=["crawl"], deep=False,
+            topic=None, cadence="weekly:0:06:00", monthly_ceiling_usd=25.0,
+        )
+        manager = FakeManager()
+
+        await fire_schedule(manager, store, schedule, data_dir, now)
+
+        assert manager.start_scan_calls[0]["budget_usd"] == pytest.approx(25.0)
 
 
 class TestFireScheduleDirect:

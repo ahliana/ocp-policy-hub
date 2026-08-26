@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import CostPlanner, { buildPlainTextTable } from './CostPlanner';
+import { setAdminToken } from '../utils/adminAuth';
 
 const GROUPS_RESPONSE = {
   quick: 'Quick scan',
@@ -40,7 +41,7 @@ function jsonResponse(status, body) {
   };
 }
 
-function mockFetch({ projectionByGroups = {} } = {}) {
+function mockFetch({ projectionByGroups = {}, scansHistory = { scans: [] } } = {}) {
   return jest.fn(async (url) => {
     const parsed = new URL(String(url));
     if (parsed.pathname.endsWith('/api/groups')) {
@@ -50,6 +51,9 @@ function mockFetch({ projectionByGroups = {} } = {}) {
       const groups = parsed.searchParams.get('groups');
       const projection = projectionByGroups[groups];
       return projection ? jsonResponse(200, projection) : jsonResponse(400, { detail: 'Unknown group' });
+    }
+    if (parsed.pathname.endsWith('/api/scans/history')) {
+      return jsonResponse(200, scansHistory);
     }
     return jsonResponse(404, {});
   });
@@ -76,6 +80,7 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+  setAdminToken('');
 });
 
 describe('CostPlanner fetching', () => {
@@ -303,5 +308,120 @@ describe('buildPlainTextTable (Copy as text)', () => {
     expect(copiedText).toContain('quick');
     expect(copiedText).toContain('$10.83');
     expect(copiedText).not.toContain('|');
+  });
+});
+
+const SCAN_ROWS = [
+  {
+    scan_id: 'scan-1',
+    domain_group: 'quick-daily',
+    status: 'completed',
+    started_at: '2026-08-20T10:00:00Z',
+    completed_at: '2026-08-20T10:30:00Z',
+    cost_usd: 5.5,
+    estimated_cost_usd: 5.0,
+    estimated_low_usd: 4.0,
+    estimated_high_usd: 6.0,
+  },
+  {
+    scan_id: 'scan-2',
+    domain_group: 'eu-full',
+    status: 'completed_budget_reached',
+    started_at: '2026-08-19T09:00:00Z',
+    completed_at: '2026-08-19T09:45:00Z',
+    cost_usd: 8.0,
+    estimated_cost_usd: 10.0,
+    estimated_low_usd: 8.0,
+    estimated_high_usd: 12.0,
+  },
+  {
+    scan_id: 'scan-3',
+    domain_group: 'us-federal',
+    status: 'failed',
+    started_at: '2026-08-18T09:00:00Z',
+    completed_at: null,
+    cost_usd: null,
+    estimated_cost_usd: null,
+    estimated_low_usd: null,
+    estimated_high_usd: null,
+  },
+];
+
+describe('CostPlanner recent scans (WP-24)', () => {
+  it('shows the empty state when there is no scan history', async () => {
+    global.fetch = mockFetch();
+    render(<CostPlanner />);
+
+    expect(await screen.findByText(
+      'No scans recorded yet - the first scheduled scan will appear here.',
+    )).toBeInTheDocument();
+    expect(screen.queryByText('quick-daily')).not.toBeInTheDocument();
+  });
+
+  it('renders a row per scan with Date, Scope, Status, Estimated, Actual and Difference', async () => {
+    global.fetch = mockFetch({ scansHistory: { scans: SCAN_ROWS } });
+    render(<CostPlanner />);
+
+    const row = await screen.findByText('quick-daily').then((cell) => cell.closest('tr'));
+    expect(within(row).getByText('completed')).toBeInTheDocument();
+    expect(within(row).getByText('$5.00')).toBeInTheDocument(); // estimated
+    expect(within(row).getByText('$5.50')).toBeInTheDocument(); // actual
+    expect(within(row).getByText('+10%')).toBeInTheDocument(); // (5.5-5.0)/5.0
+  });
+
+  it('shows a negative difference with a minus sign, no double sign', async () => {
+    global.fetch = mockFetch({ scansHistory: { scans: SCAN_ROWS } });
+    render(<CostPlanner />);
+
+    const row = await screen.findByText('eu-full').then((cell) => cell.closest('tr'));
+    expect(within(row).getByText('-20%')).toBeInTheDocument(); // (8.0-10.0)/10.0
+    expect(within(row).queryByText('+-20%')).not.toBeInTheDocument();
+  });
+
+  it('labels the completed_budget_reached status in plain language', async () => {
+    global.fetch = mockFetch({ scansHistory: { scans: SCAN_ROWS } });
+    render(<CostPlanner />);
+
+    const row = await screen.findByText('eu-full').then((cell) => cell.closest('tr'));
+    expect(within(row).getByText('completed (budget cap reached)')).toBeInTheDocument();
+  });
+
+  it('shows "-" for Estimated and Difference on a legacy row with no estimate on file', async () => {
+    global.fetch = mockFetch({ scansHistory: { scans: SCAN_ROWS } });
+    render(<CostPlanner />);
+
+    const row = await screen.findByText('us-federal').then((cell) => cell.closest('tr'));
+    expect(within(row).getByText('failed')).toBeInTheDocument();
+    // Estimated, Actual, and Difference are each "-" for this row.
+    expect(within(row).getAllByText('-')).toHaveLength(3);
+  });
+
+  it('shows the rolling-accuracy sentence once at least two rows have both figures', async () => {
+    global.fetch = mockFetch({ scansHistory: { scans: SCAN_ROWS } });
+    render(<CostPlanner />);
+
+    // Two qualifying rows (scan-1: +10%, scan-2: -20%) - largest abs diff is 20%.
+    expect(await screen.findByText('Estimates were within 20% of actual cost on the last 2 scans.'))
+      .toBeInTheDocument();
+  });
+
+  it('does not show the rolling-accuracy sentence when fewer than two rows qualify', async () => {
+    global.fetch = mockFetch({ scansHistory: { scans: [SCAN_ROWS[0], SCAN_ROWS[2]] } });
+    render(<CostPlanner />);
+
+    await screen.findByText('quick-daily');
+    expect(screen.queryByText(/Estimates were within/)).not.toBeInTheDocument();
+  });
+
+  it('requests scan history with admin headers', async () => {
+    setAdminToken('secret-token');
+    global.fetch = mockFetch({ scansHistory: { scans: SCAN_ROWS } });
+    render(<CostPlanner />);
+
+    await waitFor(() => {
+      const call = global.fetch.mock.calls.find(([url]) => String(url).includes('/api/scans/history'));
+      expect(call).toBeDefined();
+      expect(call[1].headers['X-Admin-Token']).toBe('secret-token');
+    });
   });
 });

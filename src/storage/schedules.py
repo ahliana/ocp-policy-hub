@@ -279,7 +279,8 @@ class SchedulesStore:
         UTC calendar month - the input to the monthly-ceiling pause check."""
         row = self._conn.execute(
             "SELECT COALESCE(SUM(cost_usd), 0) FROM scans "
-            "WHERE domain_group = ? AND status = 'completed' "
+            "WHERE domain_group = ? "
+            "AND status IN ('completed', 'completed_budget_reached') "
             "AND strftime('%Y-%m', completed_at) = strftime('%Y-%m', ?)",
             (domains, now.isoformat()),
         ).fetchone()

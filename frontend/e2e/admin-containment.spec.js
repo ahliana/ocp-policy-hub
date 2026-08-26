@@ -33,19 +33,30 @@ VIEWPORTS.forEach(({ width, height }) => {
     test('every direct child panel stays within the admin area right edge', async ({ page }) => {
       const adminArea = page.locator('.admin-area');
       await expect(adminArea).toBeVisible();
-      const adminBox = await adminArea.boundingBox();
-      expect(adminBox).not.toBeNull();
 
-      const childCount = await adminArea.locator(':scope > *').count();
-      expect(childCount).toBeGreaterThan(0);
+      // One atomic DOM read. A count()-then-nth() loop raced the panels'
+      // own data fetches: a re-render between the two calls can drop a
+      // child, and boundingBox() on the vanished index waits out the whole
+      // test timeout (seen live at 1920px on first run).
+      const geometry = await page.evaluate(() => {
+        const area = document.querySelector('.admin-area');
+        const areaRect = area.getBoundingClientRect();
+        return {
+          right: areaRect.right,
+          children: Array.from(area.children).map((child) => {
+            const r = child.getBoundingClientRect();
+            return { className: child.className, width: r.width, right: r.right };
+          }),
+        };
+      });
 
-      for (let i = 0; i < childCount; i += 1) {
-        const child = adminArea.locator(':scope > *').nth(i);
+      expect(geometry.children.length).toBeGreaterThan(0);
+      for (const child of geometry.children) {
         // Collapsed/zero-size children (e.g. a hidden note) contribute
         // nothing to overflow and have no meaningful box to check.
-        const box = await child.boundingBox();
-        if (!box || box.width === 0) continue;
-        expect(box.x + box.width).toBeLessThanOrEqual(adminBox.x + adminBox.width + 1);
+        if (child.width === 0) continue;
+        expect(child.right, `${child.className} exceeds the admin frame`)
+          .toBeLessThanOrEqual(geometry.right + 1);
       }
     });
 

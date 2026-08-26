@@ -197,6 +197,81 @@ describe('useCostEstimate', () => {
     });
   });
 
+  describe('cost range formatting (WP-26)', () => {
+    it('formats a range when low/high are present and differ', async () => {
+      const response = {
+        ...ESTIMATE_RESPONSE,
+        estimated_cost_usd: 6.15,
+        estimated_cost_low_usd: 4.2,
+        estimated_cost_high_usd: 9.1,
+      };
+      global.fetch = jest.fn(async () => jsonResponse(200, response));
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('ready'));
+      expect(result.current.costEstimateText).toBe('$4.20-$9.10 (typically ~$6.15) (5 targets)');
+    });
+
+    it('falls back to the point-estimate text when the band fields are absent (backward compatible)', async () => {
+      global.fetch = jest.fn(async () => jsonResponse(200, ESTIMATE_RESPONSE));
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('ready'));
+      expect(result.current.costEstimateText).toBe('$4.20 (5 targets)');
+    });
+
+    it('falls back to the point-estimate text when low equals high (no real spread)', async () => {
+      const response = {
+        ...ESTIMATE_RESPONSE,
+        estimated_cost_usd: 4.2,
+        estimated_cost_low_usd: 4.2,
+        estimated_cost_high_usd: 4.2,
+      };
+      global.fetch = jest.fn(async () => jsonResponse(200, response));
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('ready'));
+      expect(result.current.costEstimateText).toBe('$4.20 (5 targets)');
+    });
+  });
+
+  describe('raw costEstimate exposure (WP-26)', () => {
+    const CHANNELS_RESPONSE = {
+      ...ESTIMATE_RESPONSE,
+      auditor_cost_usd: 0.35,
+      assumptions: ['Assumes 100 pages per site (measured).'],
+      channels: {
+        crawl: {
+          domain_count: 5, estimated_items_or_pages: 500, screening_calls: 50,
+          analysis_calls: 25, cost_usd: 4.2, cost_low_usd: 3.0, cost_high_usd: 6.0,
+        },
+      },
+    };
+
+    it('exposes the raw estimate object, including channels and assumptions, once ready', async () => {
+      global.fetch = jest.fn(async () => jsonResponse(200, CHANNELS_RESPONSE));
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('ready'));
+      expect(result.current.costEstimate.channels).toEqual(CHANNELS_RESPONSE.channels);
+      expect(result.current.costEstimate.assumptions).toEqual(CHANNELS_RESPONSE.assumptions);
+      expect(result.current.costEstimate.auditor_cost_usd).toBe(0.35);
+    });
+
+    it('is null while idle (nothing selected)', () => {
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: [], mode: 'standard' }));
+      expect(result.current.costEstimate).toBeNull();
+    });
+
+    it('is null again after an error response', async () => {
+      global.fetch = jest.fn(async () => jsonResponse(400, {}));
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('bad_scope'));
+      expect(result.current.costEstimate).toBeNull();
+    });
+  });
+
   describe('debounce (WP-17)', () => {
     afterEach(() => {
       jest.useRealTimers();

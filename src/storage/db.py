@@ -111,12 +111,38 @@ CREATE TABLE IF NOT EXISTS scans (
     policies_found INTEGER,
     cost_usd REAL,
     input_tokens INTEGER,
-    output_tokens INTEGER
+    output_tokens INTEGER,
+    estimated_cost_usd REAL,
+    estimated_low_usd REAL,
+    estimated_high_usd REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_scans_domain_group ON scans(domain_group);
 CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);
 CREATE INDEX IF NOT EXISTS idx_scans_started_at ON scans(started_at);
+
+-- Per-domain funnel (WP-23): one row per domain per scan, written once at
+-- scan completion from that domain's final DomainProgress. For structured
+-- sources (channel != 'crawl'), pages_crawled is actually an item count -
+-- scanner.py sets self.progress.pages_crawled = len(crawl_results) for both
+-- crawl pages and structured-source items fetched from the source's API/index.
+CREATE TABLE IF NOT EXISTS scan_domains (
+    scan_id TEXT NOT NULL,
+    domain_id TEXT NOT NULL,
+    channel TEXT,
+    pages_crawled INTEGER,
+    keywords_matched INTEGER,
+    filtered_keywords INTEGER,
+    filtered_screening INTEGER,
+    llm_skipped INTEGER,
+    policies_found INTEGER,
+    errors INTEGER,
+    completed_at TEXT,
+    PRIMARY KEY (scan_id, domain_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_domains_scan_id ON scan_domains(scan_id);
+CREATE INDEX IF NOT EXISTS idx_scan_domains_channel ON scan_domains(channel);
 
 CREATE TABLE IF NOT EXISTS schedules (
     id TEXT PRIMARY KEY,
@@ -208,11 +234,33 @@ def fts5_enabled(conn: sqlite3.Connection) -> bool:
     return row is not None
 
 
+_SCANS_ESTIMATE_COLUMNS = ("estimated_cost_usd", "estimated_low_usd", "estimated_high_usd")
+
+
+def _ensure_scans_estimate_columns(conn: sqlite3.Connection) -> None:
+    """Guarded ALTER migration (WP-24): a ``scans`` table that predates the
+    estimate/actual ledger columns gets them added in place. ``CREATE TABLE
+    IF NOT EXISTS`` above is a no-op against an already-existing table, so a
+    database created before this change needs this explicit step; a brand
+    new database already has the columns via that CREATE TABLE.
+
+    Checks ``PRAGMA table_info`` first so re-running (every ``connect()``
+    call) never re-issues ``ALTER TABLE ADD COLUMN`` for a column that's
+    already there, which SQLite would reject.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(scans)")}
+    for column in _SCANS_ESTIMATE_COLUMNS:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE scans ADD COLUMN {column} REAL")
+    conn.commit()
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA_CORE)
     if fts5_supported():
         conn.executescript(_SCHEMA_FTS5)
     conn.commit()
+    _ensure_scans_estimate_columns(conn)
 
 
 def _rebuild_jurisdictions(conn: sqlite3.Connection) -> None:

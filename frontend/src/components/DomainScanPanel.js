@@ -8,12 +8,34 @@ import ModeSelector from './ModeSelector';
 import RegionSelector from './RegionSelector';
 
 // "news" is deliberately absent: news signals run on their own weekly
-// schedule, not inside a scan — a checkbox here would silently do nothing.
+// schedule, not inside a scan - a checkbox here would silently do nothing.
 const CHANNEL_OPTIONS = [
     { id: 'crawl', label: 'Government websites' },
     { id: 'law_apis', label: 'Law databases' },
     { id: 'transposition', label: 'EU transposition' },
 ];
+
+// Plain-language copy for the "Why this price?" breakdown (WP-26) - one
+// entry per channel the cost estimate can itemize. Keeps the tone rule
+// (no "LLM"/"token"/"API") in one place rather than repeated per channel.
+const CHANNEL_BREAKDOWN_COPY = {
+    crawl: { noun: 'government websites', itemNoun: 'pages checked' },
+    law_apis: { noun: 'law databases', itemNoun: 'entries checked' },
+    transposition: { noun: 'EU law trackers', itemNoun: 'entries checked' },
+};
+
+function formatUsd(value) {
+    return `$${Number(value || 0).toFixed(2)}`;
+}
+
+function channelBreakdownLine(channelId, channel) {
+    const copy = CHANNEL_BREAKDOWN_COPY[channelId];
+    if (!copy) return null;
+    return `${channel.domain_count} ${copy.noun} - about ${channel.estimated_items_or_pages} `
+        + `${copy.itemNoun}, ~${channel.screening_calls} get a fast AI pass, `
+        + `~${channel.analysis_calls} get a full AI read - ${formatUsd(channel.cost_usd)} `
+        + `(range ${formatUsd(channel.cost_low_usd)}-${formatUsd(channel.cost_high_usd)})`;
+}
 
 function DomainScanPanel({
     selectedRegions,
@@ -24,6 +46,7 @@ function DomainScanPanel({
     onChannelsChange,
     costStatus,
     costEstimateText,
+    costEstimate,
     sourceCount,
     isBusy,
     hasApiKey,
@@ -54,6 +77,16 @@ function DomainScanPanel({
         : splitSelection(selectedRegions || []).targets.length;
     const sourceLabel = `${resolvedSourceCount} source${resolvedSourceCount === 1 ? '' : 's'}`;
     const scanScopeSummary = `Scanning: ${scopeText} - ${sourceLabel} - ${costEstimateText}`;
+
+    // "Why this price?" breakdown (WP-26) - only channels the backend
+    // actually itemized are shown, in the same order as the checkboxes
+    // above. Requires a ready estimate carrying a channels breakdown.
+    const channelEntries = costStatus === 'ready' && costEstimate && costEstimate.channels
+        ? CHANNEL_OPTIONS
+            .map((option) => [option.id, costEstimate.channels[option.id]])
+            .filter(([, channel]) => Boolean(channel))
+        : [];
+    const hasCostBreakdown = channelEntries.length > 0;
 
     return (
         <div className="domain-scan" aria-label="Domain scan">
@@ -104,6 +137,29 @@ function DomainScanPanel({
                 </Tooltip>
             </div>
             <p className="scan-scope-summary" aria-live="polite">{scanScopeSummary}</p>
+            {hasCostBreakdown && (
+                <details className="cost-breakdown">
+                    <summary>Why this price?</summary>
+                    <ul className="cost-breakdown-channels">
+                        {channelEntries.map(([channelId, channel]) => (
+                            <li key={channelId}>{channelBreakdownLine(channelId, channel)}</li>
+                        ))}
+                    </ul>
+                    <p className="cost-breakdown-auditor">
+                        Report generation: {formatUsd(costEstimate.auditor_cost_usd)}
+                    </p>
+                    {Array.isArray(costEstimate.assumptions) && costEstimate.assumptions.length > 0 && (
+                        <div className="cost-breakdown-assumptions">
+                            <p className="cost-breakdown-assumptions-heading">What we assumed</p>
+                            <ul>
+                                {costEstimate.assumptions.map((assumption) => (
+                                    <li key={assumption}>{assumption}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                </details>
+            )}
             <div className="agent-action-row">
                 <button
                     type="button"
