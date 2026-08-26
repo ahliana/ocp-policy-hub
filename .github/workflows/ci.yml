@@ -1,0 +1,72 @@
+# CI: the same suite a contributor runs by hand, on every PR and main push.
+#
+# This is the community's enforcement layer. The maintainer's local commit
+# hooks (gates/) do not travel with a clone, so this workflow is what
+# guarantees a pull request was tested regardless of whose machine it came
+# from. It needs no secrets: the suite is hermetic (all network, LLM, and
+# Sheets calls are mocked) and the playwright module is imported only for
+# patching - no browser download.
+#
+# Python 3.12 matches the production container (python:3.12-slim); Node 22
+# matches the frontend build stage (node:22-alpine).
+#
+# Action references are pinned to full commit SHAs (supply-chain hygiene);
+# the trailing comment records the tag each SHA corresponds to.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,browser]"
+
+      - name: Lint
+        run: ruff check src/ tests/
+
+      - name: Tests
+        run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Tests
+        run: CI=true npx react-scripts test --watchAll=false

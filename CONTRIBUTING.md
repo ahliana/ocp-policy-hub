@@ -76,13 +76,35 @@ See the [Architecture section](README.md#architecture) in the README for how the
 
 ## Testing
 
+### Running the tests
+
+One-time setup, then the suite runs the same way everywhere:
+
 ```bash
-pytest                         # Run all tests
-pytest tests/unit/             # Unit tests only (280+)
-pytest tests/integration/      # Integration tests (109+)
+pip install -e ".[dev,browser]"   # browser extra = the playwright module tests patch; no browser download needed
+pytest                            # full backend suite
+cd frontend && npm ci && CI=true npx react-scripts test --watchAll=false   # frontend suite
+```
+
+Two things you'll see that are normal: `1 xfailed` in every pytest summary
+(a deliberately-failing canary test proving failures still get reported -
+never "fix" it), and a `gates/` folder you can ignore entirely. The gates
+are the maintainer's local commit hooks; git does not clone hooks, so they
+do nothing on your machine unless you opt in with `python gates/wire.py`
+(optional, requires Python 3.13). CI runs this same suite on every pull
+request either way - your PR is checked without any of it.
+
+```bash
+pytest tests/unit/             # Unit tests only (~1,700)
+pytest tests/integration/      # Integration tests (~165, all marked `large`)
+pytest -m "not large"          # The fast tier (~80s) - handy while iterating
 pytest tests/unit/test_keywords.py -v  # Specific file, verbose
 pytest --cov=src               # With coverage report
 ```
+
+Tests carry size markers (`small` / `medium` / `large`, registered in
+`pyproject.toml`). New tests should declare one honestly: `small` means
+hermetic - no network (enforced), no real clock, no `data/`.
 
 ### Test Categories
 
@@ -129,8 +151,10 @@ domains:
 
 Before submitting a pull request, verify:
 
-- [ ] `pytest` — all tests pass (no failures)
+- [ ] `pytest` — all tests pass (no failures; `1 xfailed` is expected)
 - [ ] `ruff check src/ tests/` — no lint errors
+- [ ] Frontend touched? `cd frontend && CI=true npx react-scripts test --watchAll=false` passes too
+- [ ] New tests carry an honest size marker (`small` / `medium` / `large`)
 - [ ] New functions have docstrings
 - [ ] New features have corresponding tests
 - [ ] YAML files are valid (no syntax errors)

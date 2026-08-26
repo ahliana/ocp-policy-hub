@@ -1,0 +1,6 @@
+# The ring-distributed gate files are hashed byte-for-byte against
+# canonical's ring-manifest.json on every commit (check_ring_current).
+# With autocrlf, a branch switch would smudge them to CRLF and the gate
+# blocks itself as ring-stale - found 2026-08-26 on the first branch
+# dance after install. Force LF so checkouts reproduce canonical bytes.
+gates/** text eol=lf
