@@ -53,3 +53,9 @@ desktop.ini
 .ruff_cache/
 explorer/
 .env.*
+
+# Proofmark runtime (the gate venv and per-run evidence are machine-local;
+# gates/*.txt baselines and gates/reports/ ship reports ARE committed)
+.venv-proofmark/
+gates/ledger/
+gates/last_coverage.txt

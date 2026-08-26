@@ -1,0 +1,4 @@
+# Gate runtime artifacts, rewritten on every run. Tracking these makes
+# the TOCTOU check fire on the gate's own output.
+last_run.log
+evidence.json

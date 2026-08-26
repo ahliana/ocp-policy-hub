@@ -1,0 +1,26 @@
+# Proofmark gate configuration. Deliberately its own file, not a section
+# of pyproject.toml: these repos have live pytest and ruff configuration
+# the application depends on, and installing a gate must not edit it.
+[proofmark]
+venv = ".venv-proofmark"
+canonical = "C:/Files/Code/Proofmark"
+src_dirs = ["src", "scripts/build_explorer.py"]
+tests_dir = "tests"
+# pytest runs from here, not from the gate venv: a real suite imports
+# the application's own dependencies and the gate venv holds four tools.
+app_venv = ".venv"
+
+[proofmark.pins]
+python = "3.13"
+pytest = "9.1.1"
+ruff = "0.16.1"
+vulture = "2.16"
+pytest-socket = "0.8.0"
+
+# Tools the SUITE needs, proven in the venv that runs it by doctor's
+# app_pin_failures. Without this table the suite's own toolchain is the
+# one thing doctor never proves - install these into the app venv.
+[proofmark.pins.app]
+pytest-cov = "7.1.0"
+coverage = "7.15.3"
+pytest-socket = "0.8.0"

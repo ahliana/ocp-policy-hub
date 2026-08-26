@@ -72,3 +72,43 @@ Data: `data/` — runtime output (policies.json, logs/, gitignored).
 - `ruff check` before commit — line length 100 chars (`pyproject.toml`)
 - The project was renamed from `ocp-policy-hub` in March 2026 — no old-name references should exist
 - License: MIT (matches OCP org standard)
+
+<!-- proofmark:begin -->
+## Quality gates (Proofmark) - read before your first commit
+
+This repo is gated. Four git hooks in `.git/hooks/` run on every commit and push,
+whoever is driving. They are not optional and not something a session turns on.
+
+**Fresh clone? You have NO enforcement yet.** Git does not clone `.git/hooks`,
+so a clone holds the gate files and zero gating, silently. One command fixes
+it: `python gates/wire.py` - creates the gate venv, installs the pinned
+tools, wires the four hooks, and proves the toolchain with doctor.
+
+- **pre-commit** runs ruff, vulture, the canary pair, and the fast test suite,
+  and enforces a test-count floor that only ever goes up.
+- **pre-push** runs the **full** suite (including tests marked `large`, which
+  pre-commit skips) and refuses a push whose commits have no filled-in
+  end-of-work report.
+
+**When you get blocked, read the message - it names the gate and the fix.** Do
+not work around it. The usual two:
+
+- *"a `fix:` commit must add or change a test"* - write the test. That is the
+  point: a fix without a test is a defect that can come back.
+- *"no end-of-work report covers the commit being pushed"* - run
+  `.venv-proofmark\Scripts\python.exe gates\gate.py ship`, answer the four questions it leaves
+  blank, commit the report, push again.
+
+`--no-verify` is **Ahliana's** break-glass, not an agent's. Every use is logged
+and reviewed. If a gate is wrong, say so and stop - do not bypass it.
+
+Slow suite? Mark the slow tests `@pytest.mark.large`. They sit out pre-commit
+and still run in full at push.
+
+Interpreters: `.venv\Scripts\python.exe` runs the tests;
+`.venv-proofmark\Scripts\python.exe` runs the gate tooling. Bare `python` is
+neither and will give you a different pytest.
+
+Fuller detail, including this repo's layout and deploy procedure:
+`docs/SESSION_BRIEF.md`.
+<!-- proofmark:end -->
