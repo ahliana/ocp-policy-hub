@@ -150,6 +150,11 @@ def under_src(path: str) -> bool:
 
 TESTS_REL = CONFIG["tests_dir"]
 TESTS = ROOT / TESTS_REL
+# JS/TS test files by runner convention, counted by never-fix-twice wherever
+# they live (frontend suites sit outside the Python tests dir).
+JS_TEST_SUFFIXES = tuple(
+    f".{kind}.{ext}" for kind in ("test", "spec")
+    for ext in ("js", "jsx", "ts", "tsx"))
 CONFIG_FILES = [
     "proofmark.toml",
     "gates/gate.py",
@@ -1385,14 +1390,19 @@ def commit_msg(path: str) -> None:
     staged = git("diff", "--cached", "--name-only").stdout.splitlines()
     # A test change means a path under the TESTS DIR, not any filename with
     # "test" in it - `latest_prices.py` satisfied the old substring match
-    # (Episode 4 review, M9).
+    # (Episode 4 review, M9). JS/TS tests are recognized by their runner
+    # suffixes (Jest `*.test.*`, Playwright `*.spec.*`) - a suffix a source
+    # file cannot wear without the runner collecting it as a test, so the
+    # M9 gaming path stays closed.
     touched_tests = [p for p in staged
-                     if p.startswith(TESTS_REL + "/") and p.endswith(".py")
-                     and Path(p).name != "test_canary.py"]
+                     if (p.startswith(TESTS_REL + "/") and p.endswith(".py")
+                         and Path(p).name != "test_canary.py")
+                     or p.endswith(JS_TEST_SUFFIXES)]
     if not touched_tests:
         ledger_line("block", "never-fix-twice", f"fix commit with no test change: {msg.splitlines()[0][:80]}")
         print("PROOFMARK BLOCK [never-fix-twice] a 'fix:' commit must add or change a test")
-        print(f"  the test belongs under {TESTS_REL}/; break-glass: git commit --no-verify (logged)")
+        print(f"  the test belongs under {TESTS_REL}/ or ends in .test.*/.spec.* (js|jsx|ts|tsx);")
+        print("  break-glass: git commit --no-verify (logged)")
         sys.exit(1)
     LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     with ESCAPES.open("a", encoding="utf-8") as f:
