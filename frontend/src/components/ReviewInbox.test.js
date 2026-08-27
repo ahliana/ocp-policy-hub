@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import ReviewInbox, { sortNewestFirst } from './ReviewInbox';
 import { setAdminToken } from '../utils/adminAuth';
 
@@ -69,6 +69,20 @@ describe('ReviewInbox', () => {
         expect(items[0]).toHaveTextContent('Early signal');
         expect(items[1]).not.toHaveTextContent('Early signal');
         expect(screen.getByText(/11 promoted to the database/)).toBeInTheDocument();
+    });
+
+    it('attaches an InfoHotspot to the Early signal chip (WP-30b)', async () => {
+        global.fetch = mockFetch();
+        render(<ReviewInbox isAdmin={false} />);
+
+        await waitFor(() => {
+            expect(screen.getByText('New finds to review (2)')).toBeInTheDocument();
+        });
+        const items = screen.getAllByRole('listitem');
+        expect(within(items[0]).getByRole('button', { name: 'What Early signal means' }))
+            .toBeInTheDocument();
+        expect(within(items[1]).queryByRole('button', { name: 'What Early signal means' }))
+            .not.toBeInTheDocument();
     });
 
     it('hides admin actions for readers', async () => {

@@ -184,7 +184,21 @@ describe('SourcesPanel note', () => {
     global.fetch = mockFetch();
     render(<SourcesPanel />);
     await waitFor(() => expect(screen.getByText('Swedish Energy Agency')).toBeInTheDocument());
-    expect(screen.getByText(/future scans/i)).toBeInTheDocument();
+    expect(screen.getByText('Changes apply to future scans - a scan already running is not affected.'))
+      .toBeInTheDocument();
+  });
+});
+
+describe('SourcesPanel help note (WP-30a)', () => {
+  it('shows "What this list is", closed by default', async () => {
+    global.fetch = mockFetch();
+    render(<SourcesPanel />);
+    await waitFor(() => expect(screen.getByText('Swedish Energy Agency')).toBeInTheDocument());
+
+    const summary = screen.getByText('What this list is');
+    const details = summary.closest('details');
+    expect(details).toHaveClass('help-note');
+    expect(details).not.toHaveAttribute('open');
   });
 });
 

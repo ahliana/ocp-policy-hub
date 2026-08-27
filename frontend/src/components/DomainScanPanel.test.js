@@ -286,6 +286,30 @@ describe('DomainScanPanel scan-decision grouping (WP-29)', () => {
   });
 });
 
+describe('DomainScanPanel "Which depth should I pick?" help note (WP-30a)', () => {
+  it('renders beside the mode cards, closed by default', async () => {
+    await renderPanel();
+    const summary = screen.getByText('Which depth should I pick?');
+    const details = summary.closest('details');
+    expect(details).toHaveClass('help-note');
+    expect(details).not.toHaveAttribute('open');
+  });
+});
+
+describe('DomainScanPanel channel-name hotspots (WP-30b)', () => {
+  it('attaches an InfoHotspot to each channel line in the "Why this price?" breakdown', async () => {
+    await renderPanel({
+      selectedRegions: ['group:eu'],
+      costStatus: 'ready',
+      costEstimate: READY_ESTIMATE,
+    });
+
+    expect(screen.getByRole('button', { name: 'More about government websites' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More about law databases' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More about EU law trackers' })).toBeInTheDocument();
+  });
+});
+
 describe('DomainScanPanel scope preview - "Where will this search?" (WP-28)', () => {
   const GERMANY_DOMAINS = [
     {
@@ -349,6 +373,17 @@ describe('DomainScanPanel scope preview - "Where will this search?" (WP-28)', ()
     expect(screen.getByText('Law databases (1)')).toBeInTheDocument();
     expect(screen.getByText('LegiScan API (US state legislation) - United States')).toBeInTheDocument();
     expect(screen.getByText('2 sources total')).toBeInTheDocument();
+  });
+
+  it('attaches an InfoHotspot to each channel-name group heading (WP-30b)', async () => {
+    global.fetch = mockFetchWithDomains();
+    await renderPanel({ selectedRegions: ['group:germany'] });
+
+    fireEvent.click(screen.getByText('Where will this search?'));
+
+    expect(await screen.findByText('Government websites (1)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More about Government websites' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More about Law databases' })).toBeInTheDocument();
   });
 
   it('the total agrees with the cost estimate\'s domain_count when both are present', async () => {

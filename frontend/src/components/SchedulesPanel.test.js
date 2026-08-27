@@ -75,6 +75,30 @@ describe('formatCadence', () => {
   });
 });
 
+describe('SchedulesPanel help notes (WP-30a)', () => {
+  it('shows "How scheduled scans run" at the top, closed by default', async () => {
+    global.fetch = mockFetch();
+    render(<SchedulesPanel />);
+
+    await waitFor(() => expect(screen.getByText('Monthly full scan')).toBeInTheDocument());
+    const summary = screen.getByText('How scheduled scans run');
+    const details = summary.closest('details');
+    expect(details).toHaveClass('help-note');
+    expect(details).not.toHaveAttribute('open');
+  });
+
+  it('shows "How the monthly ceiling works" beside the ceiling field, closed by default', async () => {
+    global.fetch = mockFetch();
+    render(<SchedulesPanel />);
+
+    await waitFor(() => expect(screen.getByLabelText(/monthly ceiling/i)).toBeInTheDocument());
+    const summary = screen.getByText('How the monthly ceiling works');
+    const details = summary.closest('details');
+    expect(details).toHaveClass('help-note');
+    expect(details).not.toHaveAttribute('open');
+  });
+});
+
 describe('SchedulesPanel list rendering', () => {
   it('fetches and renders schedule rows', async () => {
     global.fetch = mockFetch();

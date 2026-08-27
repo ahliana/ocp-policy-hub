@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { apiUrl } from '../config/api';
 import { adminHeaders } from '../utils/adminAuth';
 import { formatLabel } from '../utils/scanTargets';
+import HelpNote from './HelpNote';
+import InfoHotspot from './InfoHotspot';
 
 const CADENCES = [
     { id: 'monthly', label: 'Monthly' },
@@ -244,6 +246,15 @@ function CostPlanner() {
                 Projects scan cost into a budget figure per scope, blending real scan history
                 once a scope has run at least twice.
             </p>
+            <HelpNote label="How these projections work" className="cost-planner-help-note">
+                <p>
+                    Each figure starts from the pre-scan formula, which tends to run high.
+                    Once a scope has completed two real scans, its recorded costs replace the
+                    formula automatically - and the Recent scans table below shows how close
+                    past estimates came to real costs. Pick scope groups and a cadence to see
+                    a monthly figure you can copy as plain text into an email.
+                </p>
+            </HelpNote>
 
             <div className="cost-planner-controls">
                 <label htmlFor="cost-planner-scope-a">Scope groups (Scenario A)</label>
@@ -321,7 +332,14 @@ function CostPlanner() {
                                         <td>
                                             {item.group}
                                             {!item.history && (
-                                                <span title="No completed scans recorded for this scope yet"> *</span>
+                                                <span className="no-history-marker">
+                                                    {' *'}
+                                                    <InfoHotspot label="What the * means">
+                                                        No completed scans recorded for this scope
+                                                        yet - its figure comes from the formula,
+                                                        not from real costs.
+                                                    </InfoHotspot>
+                                                </span>
                                             )}
                                         </td>
                                         <td>{formatUsd(item.estimate_usd)}</td>
@@ -374,7 +392,13 @@ function CostPlanner() {
                                         <th>Status</th>
                                         <th>Estimated</th>
                                         <th>Actual</th>
-                                        <th>Difference</th>
+                                        <th>
+                                            <span>Difference</span>
+                                            <InfoHotspot label="What Difference means">
+                                                How far the estimate was from the real cost - plus
+                                                means it cost more than estimated.
+                                            </InfoHotspot>
+                                        </th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -382,7 +406,16 @@ function CostPlanner() {
                                         <tr key={scan.scan_id || index}>
                                             <td>{formatScanDate(scan.started_at)}</td>
                                             <td>{scan.domain_group}</td>
-                                            <td>{formatScanStatus(scan.status)}</td>
+                                            <td>
+                                                <span>{formatScanStatus(scan.status)}</span>
+                                                {scan.status === 'completed_budget_reached' && (
+                                                    <InfoHotspot label="What this status means">
+                                                        This scan stopped starting new sites when
+                                                        it reached its spending cap; everything
+                                                        already running was finished and kept.
+                                                    </InfoHotspot>
+                                                )}
+                                            </td>
                                             <td>{formatUsd(scan.estimated_cost_usd)}</td>
                                             <td>{formatUsd(scan.cost_usd)}</td>
                                             <td>

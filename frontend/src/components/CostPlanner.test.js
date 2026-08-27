@@ -83,6 +83,19 @@ afterEach(() => {
   setAdminToken('');
 });
 
+describe('CostPlanner help note (WP-30a)', () => {
+  it('shows "How these projections work", closed by default', async () => {
+    global.fetch = mockFetch();
+    render(<CostPlanner />);
+    await waitFor(() => expect(screen.getByText(/Quick scan/)).toBeInTheDocument());
+
+    const summary = screen.getByText('How these projections work');
+    const details = summary.closest('details');
+    expect(details).toHaveClass('help-note');
+    expect(details).not.toHaveAttribute('open');
+  });
+});
+
 describe('CostPlanner fetching', () => {
   it('fetches /api/groups on mount for the scope options', async () => {
     global.fetch = mockFetch();
@@ -169,6 +182,16 @@ describe('CostPlanner table rows', () => {
     await waitFor(() => expect(screen.getByText('eu')).toBeInTheDocument());
     expect(screen.getByRole('note')).toHaveTextContent(/no completed scans recorded yet/);
     expect(screen.getByText('eu').closest('td')).toHaveTextContent('*');
+  });
+
+  it('attaches an InfoHotspot to the no-history * marker (WP-30b)', async () => {
+    global.fetch = mockFetch({ projectionByGroups: { eu: PROJECTION_B } });
+    render(<CostPlanner />);
+    await waitFor(() => expect(screen.getByText(/European Union/)).toBeInTheDocument());
+    await selectScopeA('eu');
+
+    await waitFor(() => expect(screen.getByText('eu')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'What the * means' })).toBeInTheDocument();
   });
 
   it('states in the no-history note that two real scans replace the formula (WP-18)', async () => {
@@ -384,6 +407,25 @@ describe('CostPlanner recent scans (WP-24)', () => {
 
     const row = await screen.findByText('eu-full').then((cell) => cell.closest('tr'));
     expect(within(row).getByText('completed (budget cap reached)')).toBeInTheDocument();
+  });
+
+  it('attaches an InfoHotspot to the budget-cap-reached status only (WP-30b)', async () => {
+    global.fetch = mockFetch({ scansHistory: { scans: SCAN_ROWS } });
+    render(<CostPlanner />);
+
+    const budgetRow = await screen.findByText('eu-full').then((cell) => cell.closest('tr'));
+    expect(within(budgetRow).getByRole('button', { name: 'What this status means' })).toBeInTheDocument();
+
+    const completedRow = screen.getByText('quick-daily').closest('tr');
+    expect(within(completedRow).queryByRole('button', { name: 'What this status means' })).not.toBeInTheDocument();
+  });
+
+  it('attaches an InfoHotspot to the Difference column header (WP-30b)', async () => {
+    global.fetch = mockFetch({ scansHistory: { scans: SCAN_ROWS } });
+    render(<CostPlanner />);
+
+    await screen.findByText('quick-daily');
+    expect(screen.getByRole('button', { name: 'What Difference means' })).toBeInTheDocument();
   });
 
   it('shows "-" for Estimated and Difference on a legacy row with no estimate on file', async () => {

@@ -1721,6 +1721,53 @@ select,
   color: #475569;
 }
 
+/* --- How PolicyPulse works (WP-31) --- */
+
+.how-it-works-panel {
+  padding: 16px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  background-color: #ffffff;
+}
+
+.how-it-works-note > .help-note-summary {
+  font-size: 15px;
+}
+
+.how-it-works-stages {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.how-it-works-stages li {
+  margin-bottom: 10px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.how-it-works-stages strong {
+  color: #0f172a;
+}
+
+.how-it-works-control {
+  margin: 2px 0 0;
+  color: #475569;
+  font-size: 12.5px;
+}
+
+.how-it-works-cost {
+  margin-top: 8px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.how-it-works-diagram {
+  width: 100%;
+  max-width: 640px;
+  height: auto;
+  margin-top: 8px;
+}
+
 .schedules-note {
   margin: 14px 0 0;
   font-size: 12.5px;

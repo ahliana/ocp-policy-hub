@@ -130,3 +130,18 @@ describe('AgentPanel Advanced scan-scope disclosure (WP-6)', () => {
     expect(details).toHaveAttribute('open');
   });
 });
+
+describe('AgentPanel "How PolicyPulse works" placement (WP-31)', () => {
+  it('renders as the last panel inside the admin area', async () => {
+    renderPanel({ adminRequired: false, hasAdminToken: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Admin' }));
+
+    await screen.findByText(/Administrator mode/i);
+    const howItWorksSummary = await screen.findByText(
+      'How PolicyPulse works - from government website to the public map',
+    );
+    const panel = howItWorksSummary.closest('.how-it-works-panel');
+    const adminArea = document.querySelector('.admin-area');
+    expect(adminArea.lastElementChild).toBe(panel);
+  });
+});

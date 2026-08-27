@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiUrl } from '../config/api';
 import { adminHeaders } from '../utils/adminAuth';
+import HelpNote from './HelpNote';
 
 const PAGE_SIZE = 50;
 
@@ -125,6 +126,15 @@ function SourcesPanel() {
     return (
         <div className="sources-panel" aria-label="Sources panel">
             <h2 className="panel-heading">Sources - what PolicyPulse watches</h2>
+            <HelpNote label="What this list is" className="sources-help-note">
+                <p>
+                    These are the places PolicyPulse checks: government websites it reads page
+                    by page, and official law databases it queries directly. Turning a source
+                    off skips it in future scans without deleting anything. A source that needs
+                    a sign-in key shows its key status here; without the key it cannot be
+                    checked.
+                </p>
+            </HelpNote>
             {loadError && <p role="alert">{loadError}</p>}
             <p className="sources-summary">
                 {`${summary.total} sources - ${summary.enabled} enabled - `}

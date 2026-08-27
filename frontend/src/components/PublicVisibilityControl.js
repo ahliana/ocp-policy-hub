@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../config/api';
 import { adminHeaders } from '../utils/adminAuth';
+import HelpNote from './HelpNote';
 
 const OPTIONS = [
     {
@@ -20,7 +21,7 @@ const OPTIONS = [
     },
 ];
 
-// Admin control for the WP-3 "public review visibility" posture — mirrors
+// Admin control for the WP-3 "public review visibility" posture - mirrors
 // the cost-controls settings panel's load/save/confirm shape.
 function PublicVisibilityControl() {
     const [mode, setMode] = useState(null);
@@ -63,6 +64,15 @@ function PublicVisibilityControl() {
     return (
         <div className="public-visibility-control" role="radiogroup" aria-label="Public visibility">
             <h3 className="public-visibility-title">Public visibility</h3>
+            <HelpNote label="What visitors can see" className="public-visibility-help-note">
+                <p>
+                    Every find starts as &quot;awaiting review&quot; until a person promotes or
+                    rejects it. This setting decides whether visitors see unreviewed finds:
+                    show everything by default, show reviewed only by default with a switch
+                    visitors can flip, or reviewed only with no switch at all. Rejected finds
+                    are never shown to visitors under any setting.
+                </p>
+            </HelpNote>
             {OPTIONS.map((option) => (
                 <label key={option.value} className="public-visibility-option">
                     <input

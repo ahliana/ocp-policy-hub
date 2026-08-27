@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiUrl } from '../config/api';
 import { adminHeaders } from '../utils/adminAuth';
+import HelpNote from './HelpNote';
 
 // Channels a schedule can fire through ScanManager for. "news" is
 // deliberately excluded here - it runs through its own runner outside
@@ -282,6 +283,15 @@ function SchedulesPanel() {
     return (
         <div className="schedules-panel" aria-label="Schedules panel">
             <h2 className="panel-heading">Schedules - in-app scheduled scans</h2>
+            <HelpNote label="How scheduled scans run" className="schedules-top-help-note">
+                <p>
+                    A schedule runs a scan on its own at the day and time you set (times are
+                    UTC). It skips a run if the same scope is already scanning, and it pauses
+                    for the rest of the month if spending reaches the monthly ceiling. The
+                    table shows each schedule&apos;s last run, next run, and expected cost per
+                    run and per month.
+                </p>
+            </HelpNote>
             {loadError && <p role="alert">{loadError}</p>}
             {actionError && <p role="alert">{actionError}</p>}
 
@@ -482,6 +492,16 @@ function SchedulesPanel() {
                     value={form.ceiling}
                     onChange={(event) => setForm((current) => ({ ...current, ceiling: event.target.value }))}
                 />
+                <HelpNote label="How the monthly ceiling works" className="ceiling-help-note">
+                    <p>
+                        A ceiling is the most a schedule may spend in one calendar month. A
+                        running scan stops starting new sites once the month&apos;s spending
+                        reaches the ceiling, then finishes what is already in flight - so the
+                        final figure can land slightly above it. Spending resets at the start
+                        of the next month and the schedule resumes on its own. Leave the field
+                        empty for no cap.
+                    </p>
+                </HelpNote>
 
                 {createError && <p role="alert">{createError}</p>}
                 <button type="button" className="button" onClick={handleSubmit}>

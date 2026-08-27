@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { apiUrl } from '../config/api';
 import { adminHeaders } from '../utils/adminAuth';
+import InfoHotspot from './InfoHotspot';
 
 const EARLY_STAGES = new Set(['proposed', 'consultation', 'in_committee']);
 const VISIBLE_LIMIT = 5;
@@ -27,7 +28,7 @@ function ReviewInbox({ isAdmin }) {
     const refresh = useCallback(async () => {
         try {
             // adminHeaders() so this stays unclamped under a reviewed_only
-            // public visibility posture — the inbox needs review_status=new
+            // public visibility posture - the inbox needs review_status=new
             // items even when non-admin readers are clamped to promoted-only.
             const [newRes, promotedRes] = await Promise.all([
                 fetch(apiUrl('/api/policies?review_status=new'), { headers: adminHeaders() }),
@@ -136,9 +137,15 @@ function ReviewInbox({ isAdmin }) {
                                     {policy.policy_name}
                                 </a>
                                 {EARLY_STAGES.has(policy.lifecycle_stage) && (
-                                    <span className="review-chip review-chip-early">
-                                        Early signal
-                                    </span>
+                                    <>
+                                        <span className="review-chip review-chip-early">
+                                            Early signal
+                                        </span>
+                                        <InfoHotspot label="What Early signal means">
+                                            Found while still proposed, under consultation, or in
+                                            committee - before it becomes law.
+                                        </InfoHotspot>
+                                    </>
                                 )}
                             </p>
                             <p className="review-inbox-meta">

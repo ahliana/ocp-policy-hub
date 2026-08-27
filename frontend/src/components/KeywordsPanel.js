@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiUrl } from '../config/api';
 import { adminHeaders } from '../utils/adminAuth';
+import HelpNote from './HelpNote';
 
 async function fetchKeywords() {
     const response = await fetch(apiUrl('/api/keywords'), { headers: adminHeaders() });
@@ -156,6 +157,16 @@ function KeywordsPanel() {
     return (
         <div className="keywords-panel" aria-label="Keywords panel">
             <h2 className="panel-heading">Keywords - what counts as relevant</h2>
+            <HelpNote label="What counts as relevant" className="keywords-help-note">
+                <p>
+                    Before any paid reading happens, every page is scored against these
+                    weighted terms in each language, and pages below the minimum score are set
+                    aside - this screen is what keeps scan costs down. Add a term when scans
+                    miss things you expected to find. Make the screen stricter with care:
+                    stricter is cheaper but can miss more. Try a term against a real page with
+                    the page tester in the search panel before saving it.
+                </p>
+            </HelpNote>
             {loadError && <p role="alert">{loadError}</p>}
 
             {categoryNames.map((category) => {

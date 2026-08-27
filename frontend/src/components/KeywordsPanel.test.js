@@ -62,6 +62,17 @@ describe('KeywordsPanel rendering', () => {
     expect(screen.getByText(CONTEXT_SUMMARY)).toBeInTheDocument();
   });
 
+  it('shows the "What counts as relevant" help note, closed by default (WP-30a)', async () => {
+    global.fetch = mockFetch();
+    render(<KeywordsPanel />);
+
+    await waitFor(() => expect(screen.getByText(SUBJECT_SUMMARY)).toBeInTheDocument());
+    const summary = screen.getByText('What counts as relevant');
+    const details = summary.closest('details');
+    expect(details).toHaveClass('help-note');
+    expect(details).not.toHaveAttribute('open');
+  });
+
   it('shows weight and terms grouped by language inside a category', async () => {
     global.fetch = mockFetch();
     render(<KeywordsPanel />);

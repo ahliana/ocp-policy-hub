@@ -7,6 +7,7 @@ import useScopePreview from '../hooks/useScopePreview';
 import { describeSelectionLabels, splitSelection } from '../utils/scanTargets';
 import CostFunnelDiagram from './CostFunnelDiagram';
 import HelpNote from './HelpNote';
+import InfoHotspot from './InfoHotspot';
 import ModeSelector from './ModeSelector';
 import RegionSelector from './RegionSelector';
 
@@ -27,17 +28,35 @@ const CHANNEL_BREAKDOWN_COPY = {
     transposition: { noun: 'EU law trackers', itemNoun: 'entries checked' },
 };
 
+// WP-30b - one-sentence hotspot tips for the three channel kinds, shared by
+// the "Why this price?" breakdown lines below and the "Where will this
+// search?" scope-preview group headings in useScopePreview's render.
+const CHANNEL_HOTSPOT_TEXT = {
+    crawl: 'Sites we read page by page, the way a visitor would.',
+    law_apis: 'Official legal databases we query directly - faster and more precise than reading pages.',
+    transposition: "Trackers for how EU directives become each member country's national law.",
+};
+
 function formatUsd(value) {
     return `$${Number(value || 0).toFixed(2)}`;
 }
 
+// Returns JSX (not a plain string, unlike its Phase-C shape) so the sentence
+// can carry a trailing InfoHotspot - the sentence itself stays in its own
+// <span> so it is still findable as one exact text node.
 function channelBreakdownLine(channelId, channel) {
     const copy = CHANNEL_BREAKDOWN_COPY[channelId];
     if (!copy) return null;
-    return `${channel.domain_count} ${copy.noun} - about ${channel.estimated_items_or_pages} `
+    const sentence = `${channel.domain_count} ${copy.noun} - about ${channel.estimated_items_or_pages} `
         + `${copy.itemNoun}, ~${channel.screening_calls} get a fast AI pass, `
         + `~${channel.analysis_calls} get a full AI read - ${formatUsd(channel.cost_usd)} `
         + `(range ${formatUsd(channel.cost_low_usd)}-${formatUsd(channel.cost_high_usd)})`;
+    return (
+        <>
+            <span>{sentence}</span>
+            <InfoHotspot label={`More about ${copy.noun}`}>{CHANNEL_HOTSPOT_TEXT[channelId]}</InfoHotspot>
+        </>
+    );
 }
 
 // A click that lands on a HelpNote's summary while it is still closed is
@@ -139,6 +158,17 @@ function DomainScanPanel({
                     standardEstimate={standardEstimate}
                     deepEstimate={deepEstimate}
                 />
+                <HelpNote label="Which depth should I pick?" className="mode-help-note">
+                    <p>
+                        Standard is right for routine checking - it visits the government sites
+                        already on the watch list and spots new or changed policies. Discover casts
+                        a wider net: it searches the web for government sites we don&apos;t watch yet
+                        and adds what it finds, so use it when coverage of a place feels thin. Deep
+                        rereads every page of the watched sites more thoroughly and costs several
+                        times more - save it for when you suspect something was missed. The price on
+                        each card updates as you change your selection.
+                    </p>
+                </HelpNote>
                 <div className="channels-group" role="group" aria-label="Sources to check">
                     <p className="text-block-small channels-heading">Sources to check</p>
                     <FormGroup row>
@@ -211,7 +241,10 @@ function DomainScanPanel({
                                 {scopePreview.groups.map((group) => (
                                     <div key={group.id} className="scope-preview-group">
                                         <p className="scope-preview-group-heading">
-                                            {group.label} ({group.entries.length})
+                                            <span>{group.label} ({group.entries.length})</span>
+                                            <InfoHotspot label={`More about ${group.label}`}>
+                                                {CHANNEL_HOTSPOT_TEXT[group.id]}
+                                            </InfoHotspot>
                                         </p>
                                         <ul>
                                             {group.entries.map((entry) => (

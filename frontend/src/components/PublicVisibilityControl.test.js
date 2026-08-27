@@ -72,6 +72,19 @@ describe('PublicVisibilityControl', () => {
         expect(await screen.findByRole('alert')).toHaveTextContent(/could not save/i);
     });
 
+    it('shows the "What visitors can see" help note, closed by default (WP-30a)', async () => {
+        global.fetch = mockFetch({ mode: 'default_all' });
+        render(<PublicVisibilityControl />);
+
+        await waitFor(() => {
+            expect(screen.getByRole('radio', { name: /all finds by default/i })).toBeChecked();
+        });
+        const summary = screen.getByText('What visitors can see');
+        const details = summary.closest('details');
+        expect(details).toHaveClass('help-note');
+        expect(details).not.toHaveAttribute('open');
+    });
+
     it('renders each option label and hint as distinct block-level elements (WP-16)', async () => {
         global.fetch = mockFetch({ mode: 'default_all' });
         render(<PublicVisibilityControl />);
