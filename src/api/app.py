@@ -5,8 +5,12 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import math
+
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -86,6 +90,30 @@ app = FastAPI(
     redoc_url=None if _production_mode else "/redoc",
     openapi_url=None if _production_mode else "/openapi.json",
 )
+
+
+def _json_safe(value):
+    """Replace non-finite floats (nan/inf) with their string form, recursively.
+
+    FastAPI's default validation-error response echoes the client's invalid
+    input value back in the 422 detail. Starlette renders JSON with
+    allow_nan=False, so a client sending a bare NaN/Infinity in any numeric
+    field crashed the error path itself into a 500. Found by the WP-39
+    adversarial pack.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request, exc: RequestValidationError):
+    detail = _json_safe(jsonable_encoder(exc.errors()))
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
 # Non-GET routes that stay open when admin mode is active:

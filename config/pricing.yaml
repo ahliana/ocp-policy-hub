@@ -13,6 +13,15 @@
 # rather than guessing cheap, and logs a warning so the gap gets noticed.
 # =============================================================================
 
+# -----------------------------------------------------------------------
+# PROVENANCE (WP-39): Anthropic published API pricing as read 2026-08-26.
+# Source: Anthropic's public API pricing page, per-model USD/MTok rates.
+# Verify against the current published page on every model swap or added
+# entry below - CI has no way to check this external truth, so a stale
+# number here fails silently (it just quietly mis-estimates cost) rather
+# than failing a build.
+# -----------------------------------------------------------------------
+
 # USD per million tokens, per model id.
 models:
   claude-haiku-4-5-20251001:
