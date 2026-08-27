@@ -163,6 +163,17 @@ CREATE TABLE IF NOT EXISTS schedules (
 
 CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
 CREATE INDEX IF NOT EXISTS idx_schedules_next_run_at ON schedules(next_run_at);
+
+CREATE TABLE IF NOT EXISTS notification_subscriptions (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    topics TEXT NOT NULL,
+    frequency TEXT NOT NULL,
+    created_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_subscriptions_email
+    ON notification_subscriptions(email);
 """
 
 _SCHEMA_FTS5 = """

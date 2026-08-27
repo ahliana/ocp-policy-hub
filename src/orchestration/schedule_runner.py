@@ -36,6 +36,7 @@ from datetime import datetime
 
 from ..core.log_setup import log_audit_event
 from ..core.models import ScanStatus
+from ..notifications.digest import run_digest_tick_for_data_dir
 from ..storage.schedules import SchedulesStore, compute_next_run
 
 logger = logging.getLogger(__name__)
@@ -177,8 +178,21 @@ async def run_due_schedules(
                 pass
 
 
+async def run_tick(
+    manager, store: SchedulesStore, data_dir: str = "data", now: datetime = None,
+) -> None:
+    """One full tick of the background loop: fire due schedules, then run
+    the WP-44 notification digest check. Two independent jobs sharing one
+    interval - each already guarantees it never raises (see
+    run_due_schedules/run_digest_tick_for_data_dir), so a failure in one
+    cannot stop the other from running on this or the next tick.
+    """
+    await run_due_schedules(manager, store, data_dir, now)
+    run_digest_tick_for_data_dir(data_dir=data_dir, now=now)
+
+
 class ScheduleRunner:
-    """Owns the background asyncio task that drives run_due_schedules()."""
+    """Owns the background asyncio task that drives run_tick()."""
 
     def __init__(self, manager, store: SchedulesStore, data_dir: str = "data"):
         self.manager = manager
@@ -202,9 +216,9 @@ class ScheduleRunner:
     async def _loop(self) -> None:
         while True:
             try:
-                await run_due_schedules(self.manager, self.store, self.data_dir)
+                await run_tick(self.manager, self.store, self.data_dir)
             except Exception as e:
-                # Belt-and-braces: run_due_schedules already catches its own
+                # Belt-and-braces: run_tick's own pieces already catch their
                 # errors, but the loop itself must never die either.
                 logger.error("Schedule runner tick crashed: %s", e)
             await asyncio.sleep(TICK_SECONDS)

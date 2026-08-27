@@ -7,12 +7,12 @@ no real asyncio.create_task loop, no time.sleep.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.core.models import ScanJob, ScanStatus
-from src.orchestration.schedule_runner import fire_schedule, run_due_schedules
+from src.orchestration.schedule_runner import fire_schedule, run_due_schedules, run_tick
 from src.storage.schedules import SchedulesStore
 
 
@@ -397,6 +397,52 @@ class TestBudgetPassedToStartScan:
         await fire_schedule(manager, store, schedule, data_dir, now)
 
         assert manager.start_scan_calls[0]["budget_usd"] == pytest.approx(25.0)
+
+
+@pytest.mark.medium
+class TestRunTick:
+    """WP-44: run_tick() is the loop's actual per-tick call - fire due
+    schedules, then run the notification digest check. The digest side is
+    fully covered in tests/unit/test_digest.py; this just proves the two
+    are wired together and a broken digest tick can't stop schedules from
+    firing (or vice versa).
+    """
+
+    @pytest.mark.asyncio
+    async def test_calls_both_schedules_and_digest(self, store, data_dir, monkeypatch):
+        now = datetime(2026, 1, 5, 6, 0)
+        _due_schedule(store, now, domains="quick")
+        manager = FakeManager()
+        mock_digest = MagicMock()
+        monkeypatch.setattr(
+            "src.orchestration.schedule_runner.run_digest_tick_for_data_dir", mock_digest,
+        )
+
+        await run_tick(manager, store, data_dir=data_dir, now=now)
+
+        manager.start_scan.assert_awaited_once()
+        mock_digest.assert_called_once_with(data_dir=data_dir, now=now)
+        # Redundant with the mock asserts above; the assert-quality AST gate
+        # cannot see mock methods.
+        assert mock_digest.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_digest_failure_does_not_block_schedules(self, store, data_dir, monkeypatch):
+        now = datetime(2026, 1, 5, 6, 0)
+        _due_schedule(store, now, domains="quick")
+        manager = FakeManager()
+        monkeypatch.setattr(
+            "src.orchestration.schedule_runner.run_digest_tick_for_data_dir",
+            lambda **kwargs: (_ for _ in ()).throw(RuntimeError("digest boom")),
+        )
+
+        with pytest.raises(RuntimeError):
+            await run_tick(manager, store, data_dir=data_dir, now=now)
+
+        # The schedule itself still fired before the digest step blew up -
+        # ScheduleRunner._loop's own try/except is what protects the next
+        # tick; run_tick itself is a thin sequential composition.
+        manager.start_scan.assert_awaited_once()
 
 
 class TestFireScheduleDirect:

@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from ..core.models import DEFAULT_SCREENING_MODEL
 from ..core.urls import normalize_url
+from ..notifications.mailer import notify_immediate
 from ..storage.leads import Lead, LeadStore
 from ..storage.signals_status import FeedFailure, SignalsStatusStore, SweepSummary
 
@@ -331,6 +332,17 @@ async def run_news_signals(
         failures=[FeedFailure(**f) for f in sweep_stats["failures"]],
     )
     SignalsStatusStore(data_dir=str(lead_store.data_dir)).record(summary)
+
+    if summary.feeds_failed > 0:
+        lines = [f"The news sweep had {summary.feeds_failed} feed failure(s):", ""]
+        lines += [f"- {f.name}: {f.detail}" for f in summary.failures]
+        lines += ["", "Open the admin page to act on these."]
+        notify_immediate(
+            "ops_alerts",
+            "PolicyPulse: news sweep had feed failures",
+            "\n".join(lines),
+            data_dir=str(lead_store.data_dir),
+        )
 
     # Built from the persisted summary's own fields so the returned dict,
     # the kv record, and the /api/signals/status payload cannot drift apart.

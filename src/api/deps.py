@@ -181,6 +181,28 @@ def get_signals_status_store():
     return SignalsStatusStore(data_dir=data_dir)
 
 
+@lru_cache()
+def get_notification_subscriptions_store():
+    from ..storage.notifications import NotificationSubscriptionsStore
+    data_dir = os.environ.get("OCP_DATA_DIR", "data")
+    return NotificationSubscriptionsStore(data_dir=data_dir)
+
+
+@lru_cache()
+def get_notification_state_store():
+    from ..storage.notifications import NotificationStateStore
+    data_dir = os.environ.get("OCP_DATA_DIR", "data")
+    return NotificationStateStore(data_dir=data_dir)
+
+
+@lru_cache()
+def get_mailer():
+    from ..notifications.mailer import Mailer
+    config_dir = os.environ.get("OCP_CONFIG_DIR", "config")
+    data_dir = os.environ.get("OCP_DATA_DIR", "data")
+    return Mailer(config_dir=config_dir, data_dir=data_dir)
+
+
 def get_scan_manager() -> ScanManager:
     if _scan_manager_state["instance"] is None:
         config = get_config()

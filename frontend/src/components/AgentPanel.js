@@ -12,6 +12,7 @@ import DomainScanPanel from './DomainScanPanel';
 import HowItWorksPanel from './HowItWorksPanel';
 import KeywordsPanel from './KeywordsPanel';
 import LibraryView from './LibraryView';
+import NotificationsPanel from './NotificationsPanel';
 import PolicyScannerHeader from './PolicyScannerHeader';
 import PublicVisibilityControl from './PublicVisibilityControl';
 import ReviewInbox from './ReviewInbox';
@@ -219,6 +220,7 @@ function AgentPanel({
                     <SourcesPanel />
                     <KeywordsPanel />
                     <SchedulesPanel />
+                    <NotificationsPanel />
                     <HowItWorksPanel />
                 </div>
             ) : (

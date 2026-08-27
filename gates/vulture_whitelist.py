@@ -23,7 +23,9 @@ cancel_scan  # src\api\routes\scans.py:252
 chase_tip  # src\api\routes\leads.py:148
 cost_projection  # src\api\routes\cost_projection.py:65
 create_schedule  # src\api\routes\schedules.py:144
+create_subscription  # src\api\routes\notifications.py:94
 delete_schedule  # src\api\routes\schedules.py:187
+delete_subscription  # src\api\routes\notifications.py:124
 dismiss_tip  # src\api\routes\leads.py:137
 estimate_cost  # src\api\routes\scans.py:280
 get_api_key_status  # src\api\routes\settings.py:93
@@ -43,7 +45,7 @@ get_scan  # src\api\routes\scans.py:175
 get_settings  # src\api\routes\analysis.py:190
 get_sheet_link  # src\api\routes\settings.py:140
 get_sources_status  # src\api\routes\sources_admin.py:66
-health  # src\api\app.py:270
+health  # src\api\app.py:271
 library  # src\api\routes\policies.py:174
 list_categories  # src\api\routes\domains.py:72
 list_domains  # src\api\routes\domains.py:16
@@ -52,12 +54,14 @@ list_policies  # src\api\routes\policies.py:49
 list_regions  # src\api\routes\domains.py:66
 list_scans  # src\api\routes\scans.py:119
 list_schedules  # src\api\routes\schedules.py:132
+list_subscriptions  # src\api\routes\notifications.py:84
 list_tags  # src\api\routes\domains.py:78
 list_tips  # src\api\routes\leads.py:67
+notifications_status  # src\api\routes\notifications.py:134
 policy_stats  # src\api\routes\policies.py:262
 reload_config_route  # src\api\routes\config_admin.py:14
 remove_api_key  # src\api\routes\settings.py:228
-root  # src\api\app.py:252
+root  # src\api\app.py:253
 run_agent  # src\api\routes\agent.py:37
 run_schedule_now  # src\api\routes\schedules.py:197
 save_api_key  # src\api\routes\settings.py:112
@@ -76,6 +80,7 @@ update_public_visibility  # src\api\routes\settings.py:217
 update_review_status  # src\api\routes\policies.py:217
 update_schedule  # src\api\routes\schedules.py:166
 update_source_enabled  # src\api\routes\sources_admin.py:89
+update_subscription  # src\api\routes\notifications.py:108
 
 # enum members
 ACCESS_DENIED  # src\core\models.py:44

@@ -336,6 +336,45 @@ class TestSweepSummaryLogAndPersistence:
 
     @pytest.mark.medium
     @pytest.mark.asyncio
+    async def test_feed_failures_trigger_an_immediate_ops_alert(self, tmp_path):
+        # WP-44: a sweep with feed failures notifies "ops_alerts" immediate
+        # subscribers - notify_immediate itself is fully unit-tested in
+        # tests/unit/test_mailer.py, so this just checks the wiring: it gets
+        # called with the right topic and the failure detail in the body.
+        config = {
+            "enabled": True,
+            "max_leads_per_run": 10,
+            "gdelt": {"enabled": False},
+            "google_news": {"enabled": False},
+            "rss_feeds": [{"name": "Dead", "url": "https://feeds.example/dead"}],
+        }
+        store = LeadStore(data_dir=str(tmp_path))
+        client = _mock_http_routed([("dead", (404, "Not Found"))])
+        with patch("src.signals.news.httpx.AsyncClient", return_value=client), \
+                patch("src.signals.news.notify_immediate") as mock_notify:
+            await run_news_signals(config, store, api_key=None)
+
+        mock_notify.assert_called_once()
+        args, kwargs = mock_notify.call_args
+        assert args[0] == "ops_alerts"
+        assert "feed:Dead" in args[2]
+        assert kwargs["data_dir"] == str(tmp_path)
+
+    @pytest.mark.medium
+    @pytest.mark.asyncio
+    async def test_no_feed_failures_does_not_notify(self, signals_config, tmp_path):
+        store = LeadStore(data_dir=str(tmp_path))
+        with patch("src.signals.news.httpx.AsyncClient", return_value=_mock_http()), \
+                patch("src.signals.news.notify_immediate") as mock_notify:
+            await run_news_signals(signals_config, store, api_key=None)
+
+        mock_notify.assert_not_called()
+        # Redundant with assert_not_called; the assert-quality AST gate
+        # cannot see mock methods.
+        assert mock_notify.call_count == 0
+
+    @pytest.mark.medium
+    @pytest.mark.asyncio
     async def test_logs_one_structured_summary_line(self, signals_config, tmp_path, caplog):
         store = LeadStore(data_dir=str(tmp_path))
         with caplog.at_level("INFO", logger="src.signals.news"):

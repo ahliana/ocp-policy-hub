@@ -1790,3 +1790,83 @@ select,
   font-size: 12.5px;
   color: #64748b;
 }
+
+/* --- Email notifications (WP-44) --- */
+
+.notifications-smtp-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #d7dee8;
+  border-radius: 6px;
+  background-color: #f8fafc;
+  color: #475569;
+  font-size: 13px;
+}
+
+.notifications-send-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #e0a640;
+  border-radius: 6px;
+  background-color: #fdecc8;
+  color: #7a4a06;
+  font-size: 13px;
+}
+
+.notifications-empty {
+  margin: 0;
+  color: #64748b;
+  font-size: 13.5px;
+}
+
+.notifications-table th,
+.notifications-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid #eef2f7;
+  vertical-align: top;
+}
+
+.notifications-table th {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.notifications-add-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 480px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #eef2f7;
+}
+
+.notifications-add-form label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.notifications-add-form input[type="email"],
+.notifications-add-form input[type="text"],
+.notifications-add-form select {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.notifications-add-form fieldset {
+  border: 1px solid #eef2f7;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.notifications-add-form legend {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #475569;
+}

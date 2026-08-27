@@ -145,3 +145,23 @@ describe('AgentPanel "How PolicyPulse works" placement (WP-31)', () => {
     expect(adminArea.lastElementChild).toBe(panel);
   });
 });
+
+describe('AgentPanel "Email notifications" placement (WP-44)', () => {
+  it('renders between the Schedules panel and the How it works panel', async () => {
+    renderPanel({ adminRequired: false, hasAdminToken: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Admin' }));
+
+    await screen.findByText(/Administrator mode/i);
+    const notificationsHeading = await screen.findByText('Email notifications');
+    const panel = notificationsHeading.closest('.notifications-panel');
+    const adminArea = document.querySelector('.admin-area');
+    const children = Array.from(adminArea.children);
+    const schedulesIndex = children.findIndex((el) => el.classList.contains('schedules-panel'));
+    const notificationsIndex = children.indexOf(panel);
+    const howItWorksIndex = children.findIndex((el) => el.classList.contains('how-it-works-panel'));
+
+    expect(schedulesIndex).toBeGreaterThanOrEqual(0);
+    expect(notificationsIndex).toBe(schedulesIndex + 1);
+    expect(howItWorksIndex).toBe(notificationsIndex + 1);
+  });
+});

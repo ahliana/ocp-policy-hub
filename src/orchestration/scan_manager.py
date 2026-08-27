@@ -28,6 +28,7 @@ from ..core.models import (
 )
 from ..core.overrides import apply_domain_overrides
 from ..core.pricing import PricingLoader
+from ..notifications.mailer import notify_immediate
 from ..core.scanner import DomainScanner
 from ..core.verifier import Verifier
 from ..storage.scan_history import ScanHistoryStore
@@ -519,6 +520,15 @@ class ScanManager:
                                 budget_usd=budget_usd,
                                 cost_usd=llm_client.cost.total_usd,
                             )
+                            notify_immediate(
+                                "ops_alerts",
+                                f"PolicyPulse: scan {scan_id} stopped after reaching its budget",
+                                f"The scan for {job.domain_group} stopped early after "
+                                f"reaching its budget of ${budget_usd:.2f} "
+                                f"(spent ${llm_client.cost.total_usd:.2f}).\n\n"
+                                "Open the admin page to act on these.",
+                                data_dir=self.data_dir,
+                            )
 
                     # Persist policies immediately so they survive crashes.
                     # PolicyStore.add_policies deduplicates by URL and saves
@@ -804,6 +814,13 @@ class ScanManager:
                 cost_usd=job.cost.total_usd if job.cost else 0,
                 input_tokens=job.cost.input_tokens if job.cost else None,
                 output_tokens=job.cost.output_tokens if job.cost else None,
+            )
+            notify_immediate(
+                "ops_alerts",
+                f"PolicyPulse: scan {scan_id} failed",
+                f"The scan for {job.domain_group} failed: {e}\n\n"
+                "Open the admin page to act on these.",
+                data_dir=self.data_dir,
             )
             await self.broadcaster.broadcast(ScanEvent(
                 scan_id=scan_id,

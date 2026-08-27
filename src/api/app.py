@@ -23,8 +23,8 @@ from .deps import (
 )
 from .routes import (
     domains, scans, policies, analysis, agent, ask, coverage, cost_projection,
-    config_admin, keywords_admin, leads, logs, schedules, search, settings, signals,
-    sources_admin,
+    config_admin, keywords_admin, leads, logs, notifications, schedules, search, settings,
+    signals, sources_admin,
 )
 from .static_site import mount_frontend
 
@@ -242,6 +242,7 @@ app.include_router(sources_admin.router)
 app.include_router(keywords_admin.router)
 app.include_router(leads.router)
 app.include_router(logs.router)
+app.include_router(notifications.router)
 app.include_router(schedules.router)
 app.include_router(search.router)
 app.include_router(settings.router)

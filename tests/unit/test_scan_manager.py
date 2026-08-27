@@ -774,6 +774,29 @@ class TestScanHistoryWiring:
         row = ScanHistoryStore(data_dir=str(data_dir)).list()[0]
         assert row["status"] == "failed"
 
+    @pytest.mark.medium
+    @pytest.mark.asyncio
+    async def test_failed_scan_sends_an_immediate_ops_alert(self, tmp_path, monkeypatch):
+        # WP-44 wiring: notify_immediate itself is fully unit-tested in
+        # tests/unit/test_mailer.py - this just checks the scan-failure path
+        # calls it with the right topic and the failure reason in the body.
+        manager, data_dir = self._manager(tmp_path, monkeypatch, domain_scan_result=[])
+        monkeypatch.setattr(
+            "src.core.cache.URLCache.save",
+            MagicMock(side_effect=RuntimeError("disk full")),
+        )
+        mock_notify = MagicMock()
+        monkeypatch.setattr("src.orchestration.scan_manager.notify_immediate", mock_notify)
+
+        job = await manager.start_scan(domains_group="quick", skip_llm=True)
+        await manager._tasks[job.scan_id]
+
+        mock_notify.assert_called_once()
+        args, kwargs = mock_notify.call_args
+        assert args[0] == "ops_alerts"
+        assert "disk full" in args[2]
+        assert kwargs["data_dir"] == str(data_dir)
+
     @pytest.mark.asyncio
     async def test_dry_run_writes_no_history_row(self, tmp_path, monkeypatch):
         manager, data_dir = self._manager(tmp_path, monkeypatch, domain_scan_result=[])
@@ -997,6 +1020,25 @@ class TestBudgetStop:
         # job.status itself stays the enum-constrained COMPLETED.
         assert manager.jobs[job.scan_id].status.value == "completed"
         assert manager.jobs[job.scan_id].budget_reached is True
+
+    @pytest.mark.asyncio
+    async def test_budget_reached_sends_an_immediate_ops_alert(self, tmp_path, monkeypatch):
+        # WP-44 wiring: notify_immediate itself is fully unit-tested in
+        # tests/unit/test_mailer.py - this just checks the budget-stop path
+        # calls it once with the right topic.
+        manager, data_dir = self._manager(tmp_path, monkeypatch)
+        mock_notify = MagicMock()
+        monkeypatch.setattr("src.orchestration.scan_manager.notify_immediate", mock_notify)
+
+        job = await manager.start_scan(
+            domains_group="quick", skip_llm=False, max_concurrent=1, budget_usd=12.0,
+        )
+        await manager._tasks[job.scan_id]
+
+        mock_notify.assert_called_once()
+        args, kwargs = mock_notify.call_args
+        assert args[0] == "ops_alerts"
+        assert kwargs["data_dir"] == str(data_dir)
 
     @pytest.mark.asyncio
     async def test_no_budget_behaves_exactly_as_before(self, tmp_path, monkeypatch):
