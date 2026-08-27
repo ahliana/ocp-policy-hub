@@ -38,9 +38,18 @@ def lead_store(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def _overrides(store, lead_store):
+def _overrides(store, lead_store, tmp_path, monkeypatch):
     from src.api import deps
     from src.api.app import app
+    from src.api.routes import leads as tips_route
+
+    # The tips limiter is a module singleton whose daily counter persists in
+    # OCP_DATA_DIR (default: the repo's real data/). Without this reset, the
+    # exempt-route tests here inherit whatever today's earlier runs consumed
+    # of the 100/day cap and start failing with 429s mid-afternoon (L009:
+    # verdict depending on untracked local state + the real clock).
+    monkeypatch.setenv("OCP_DATA_DIR", str(tmp_path))
+    tips_route.reset_tip_limits_for_tests(data_dir=str(tmp_path))
 
     manager = MagicMock()
     manager.get_all_policies.return_value = []
