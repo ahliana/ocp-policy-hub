@@ -5,11 +5,37 @@ import InfoHotspot from './InfoHotspot';
 
 const EARLY_STAGES = new Set(['proposed', 'consultation', 'in_committee']);
 const VISIBLE_LIMIT = 5;
+const EARLY_FIRST_STORAGE_KEY = 'review-inbox-early-first';
 
 export function sortNewestFirst(policies) {
     return [...policies].sort((a, b) =>
         String(b.discovered_at || '').localeCompare(String(a.discovered_at || '')),
     );
+}
+
+// Stable sort: within the early group and within the non-early group, the
+// existing (newest-first) relative order is untouched - only the two groups
+// swap places.
+export function sortEarlyFirst(policies) {
+    return [...policies].sort((a, b) =>
+        Number(EARLY_STAGES.has(b.lifecycle_stage)) - Number(EARLY_STAGES.has(a.lifecycle_stage)),
+    );
+}
+
+function getStoredEarlyFirst() {
+    try {
+        return window.sessionStorage.getItem(EARLY_FIRST_STORAGE_KEY) === 'true';
+    } catch {
+        return false;
+    }
+}
+
+function setStoredEarlyFirst(value) {
+    try {
+        window.sessionStorage.setItem(EARLY_FIRST_STORAGE_KEY, value ? 'true' : 'false');
+    } catch {
+        // sessionStorage can be unavailable in private or restricted browser modes.
+    }
 }
 
 function formatFound(discoveredAt) {
@@ -24,6 +50,12 @@ function ReviewInbox({ isAdmin }) {
     const [promotedCount, setPromotedCount] = useState(0);
     const [sheetUrl, setSheetUrl] = useState(null);
     const [error, setError] = useState('');
+    const [earlyFirst, setEarlyFirst] = useState(getStoredEarlyFirst);
+
+    const toggleEarlyFirst = (checked) => {
+        setEarlyFirst(checked);
+        setStoredEarlyFirst(checked);
+    };
 
     const refresh = useCallback(async () => {
         try {
@@ -105,7 +137,8 @@ function ReviewInbox({ isAdmin }) {
         );
     }
 
-    const visible = pending.slice(0, VISIBLE_LIMIT);
+    const ordered = earlyFirst ? sortEarlyFirst(pending) : pending;
+    const visible = ordered.slice(0, VISIBLE_LIMIT);
     const hiddenCount = pending.length - visible.length;
 
     return (
@@ -127,6 +160,15 @@ function ReviewInbox({ isAdmin }) {
                 Each row is already in the Staging sheet - fill in the judgment columns
                 there, then mark it reviewed.
             </p>
+            <label className="review-early-first-toggle" htmlFor="review-early-first-checkbox">
+                <input
+                    id="review-early-first-checkbox"
+                    type="checkbox"
+                    checked={earlyFirst}
+                    onChange={(event) => toggleEarlyFirst(event.target.checked)}
+                />
+                Early signals first
+            </label>
             {error && <p className="ask-box-error" role="alert">{error}</p>}
             <ul className="review-inbox-list">
                 {visible.map((policy) => (

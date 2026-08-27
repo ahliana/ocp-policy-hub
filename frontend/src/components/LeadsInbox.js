@@ -3,11 +3,18 @@ import Tooltip from '@mui/material/Tooltip';
 import { apiUrl } from '../config/api';
 import { adminHeaders } from '../utils/adminAuth';
 import { cleanTipText } from '../utils/plainText';
+import InfoHotspot from './InfoHotspot';
 
 function formatWhen(isoString) {
     if (!isoString) return '';
     const parsed = new Date(isoString);
     return Number.isNaN(parsed.getTime()) ? '' : parsed.toLocaleString();
+}
+
+function formatSweepDate(isoString) {
+    if (!isoString) return '';
+    const parsed = new Date(isoString);
+    return Number.isNaN(parsed.getTime()) ? '' : parsed.toLocaleDateString();
 }
 
 const UNTITLED_FALLBACK = 'Untitled source';
@@ -36,6 +43,10 @@ function LeadsInbox({ adminRequired = false, hasAdminToken = false }) {
     const [isSuggesting, setIsSuggesting] = useState(false);
     const [suggestMessage, setSuggestMessage] = useState('');
     const [busyLeadId, setBusyLeadId] = useState(null);
+    // null covers both "not fetched yet" and "not signed in" (a 403 or any
+    // other failed fetch) - either way there is nothing to show. A fetched
+    // {} (no sweep recorded) is a distinct, truthy value handled separately.
+    const [sweepStatus, setSweepStatus] = useState(null);
 
     const isAdminLocked = adminRequired && !hasAdminToken;
 
@@ -68,6 +79,19 @@ function LeadsInbox({ adminRequired = false, hasAdminToken = false }) {
             window.removeEventListener('policy-data-changed', loadLeads);
         };
     }, [loadLeads]);
+
+    useEffect(() => {
+        let cancelled = false;
+        fetch(apiUrl('/api/signals/status'), { headers: adminHeaders() })
+            .then((response) => (response.ok ? response.json() : null))
+            .then((data) => {
+                if (!cancelled) setSweepStatus(data);
+            })
+            .catch(() => {
+                if (!cancelled) setSweepStatus(null);
+            });
+        return () => { cancelled = true; };
+    }, []);
 
     const submitSuggestion = async (event) => {
         event.preventDefault();
@@ -194,6 +218,32 @@ function LeadsInbox({ adminRequired = false, hasAdminToken = false }) {
                         </button>
                     </form>
                     {suggestMessage && <p className="text-block-small">{suggestMessage}</p>}
+
+                    {sweepStatus && (
+                        Object.keys(sweepStatus).length === 0 ? (
+                            <p className="text-block-small leads-sweep-status">
+                                No sweep recorded yet.
+                            </p>
+                        ) : (
+                            <p className="text-block-small leads-sweep-status">
+                                Last sweep: {formatSweepDate(sweepStatus.ran_at)} -{' '}
+                                {sweepStatus.added_after_dedupe} new tips ({sweepStatus.feeds_ok}{' '}
+                                feeds ok, {sweepStatus.feeds_failed} failed).
+                                {sweepStatus.feeds_failed > 0 && (
+                                    <InfoHotspot label="Which feeds failed">
+                                        {(sweepStatus.failures || []).map((failure, index) => (
+                                            <React.Fragment key={failure.feed || index}>
+                                                {index > 0 && <br />}
+                                                {failure.feed}: {failure.reason}
+                                            </React.Fragment>
+                                        ))}
+                                        <br />
+                                        Fix the feed address or turn the feed off in configuration.
+                                    </InfoHotspot>
+                                )}
+                            </p>
+                        )
+                    )}
 
                     {isLoading ? (
                         <p className="text-block-small">Loading tips...</p>

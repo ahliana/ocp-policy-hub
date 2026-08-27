@@ -174,6 +174,13 @@ def get_schedules_store():
     return SchedulesStore(data_dir=data_dir)
 
 
+@lru_cache()
+def get_signals_status_store():
+    from ..storage.signals_status import SignalsStatusStore
+    data_dir = os.environ.get("OCP_DATA_DIR", "data")
+    return SignalsStatusStore(data_dir=data_dir)
+
+
 def get_scan_manager() -> ScanManager:
     if _scan_manager_state["instance"] is None:
         config = get_config()

@@ -435,6 +435,13 @@ select,
   font-size: 14px;
 }
 
+.leads-sweep-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
 .leads-list {
   list-style: none;
   margin: 0;
@@ -979,6 +986,16 @@ select,
   font-size: 13px;
   color: #2563eb;
   white-space: nowrap;
+}
+
+.review-early-first-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
 }
 
 .review-inbox-list {

@@ -20,6 +20,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from . import db as storage_db
+from ..core.urls import normalize_url
 
 logger = logging.getLogger(__name__)
 
@@ -29,21 +30,31 @@ LEAD_STATUSES = ("new", "chased", "dismissed")
 def _dedupe_key(source_url: str, snippet: str) -> str:
     """Uniqueness key for the leads.source_url column.
 
-    A real source_url is used as-is. A note-only tip has no URL — every
-    such tip would otherwise store "" and collide under the column's
-    UNIQUE index, silently dropping every note-only submission after the
-    first. Falling back to a hash of the note text keeps distinct notes
-    distinct while still deduping an identical note resubmitted twice.
+    A real source_url is normalized (see ``core.urls.normalize_url``) so
+    that URL variants - utm_* tracking params, a Google News redirect
+    wrapper, http vs https, a trailing slash - collapse to the same key
+    across weeks instead of each looking like a new lead. A note-only tip
+    has no URL - every such tip would otherwise store "" and collide under
+    the column's UNIQUE index, silently dropping every note-only submission
+    after the first. Falling back to a hash of the note text keeps distinct
+    notes distinct while still deduping an identical note resubmitted twice.
+
+    Caution: this key is only applied to NEW rows. A row inserted before
+    normalization was added keeps its old (raw-URL) key forever - rows are
+    never migrated. A pre-existing raw-keyed lead and a newly normalized
+    variant of the same URL therefore collide exactly once (the first time
+    the normalized variant is seen); every insert after that shares the
+    normalized key and dedupes normally.
     """
     if source_url:
-        return source_url
+        return normalize_url(source_url)
     return "note:" + hashlib.sha256(snippet.encode("utf-8")).hexdigest()
 
 
 class Lead(BaseModel):
     lead_id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
     title: str
-    # "" for a note-only tip (no URL) — see _dedupe_key() for how these
+    # "" for a note-only tip (no URL) - see _dedupe_key() for how these
     # avoid colliding with each other under the source_url UNIQUE index.
     source_url: str = ""
     snippet: str = ""
@@ -55,7 +66,7 @@ class Lead(BaseModel):
     status: str = "new"
     policy_url: Optional[str] = None  # set when a chase produced a policy
     chased_at: Optional[datetime] = None
-    # policy_found | no_policy | fetch_failed — see LeadStore.record_chase
+    # policy_found | no_policy | fetch_failed - see LeadStore.record_chase
     chase_outcome: Optional[str] = None
     chase_error: Optional[str] = None  # reason text, only set for fetch_failed
 
@@ -94,7 +105,7 @@ class LeadStore:
         """Add leads, skipping duplicates. Returns added count.
 
         Deduplication key: source_url when present, otherwise a hash of the
-        note text (see _dedupe_key) — the source_url column carries this key
+        note text (see _dedupe_key) - the source_url column carries this key
         for uniqueness only; the stored ``raw`` record keeps the lead's real
         source_url ("" for a note-only tip), so callers reading a lead back
         never see the substituted key.
@@ -117,7 +128,7 @@ class LeadStore:
                 added += 1
         # Commit unconditionally: even an all-duplicates batch ran INSERT OR
         # IGNORE statements, which open an implicit transaction that must be
-        # closed out — otherwise it's left open on this connection and
+        # closed out - otherwise it's left open on this connection and
         # blocks the next writer.
         self._conn.commit()
         return added
@@ -171,7 +182,7 @@ class LeadStore:
     ) -> Optional[Lead]:
         """Record a chase attempt's outcome (policy_found | no_policy | fetch_failed).
 
-        mark_chased=False keeps the lead's current status unchanged — used
+        mark_chased=False keeps the lead's current status unchanged - used
         for fetch failures, which must not remove the tip from further
         chase attempts (see the /tips/{id}/chase route).
         """

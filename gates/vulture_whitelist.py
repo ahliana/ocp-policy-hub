@@ -15,7 +15,7 @@ suppress the findings L003 exists to surface.
 """
 
 # route handlers
-_validation_error_handler  # src\api\app.py:114
+_validation_error_handler  # src\api\app.py:115
 agent_websocket  # src\api\routes\agent.py:85
 analyze_url  # src\api\routes\analysis.py:23
 ask  # src\api\routes\ask.py:58
@@ -43,7 +43,7 @@ get_scan  # src\api\routes\scans.py:175
 get_settings  # src\api\routes\analysis.py:190
 get_sheet_link  # src\api\routes\settings.py:140
 get_sources_status  # src\api\routes\sources_admin.py:66
-health  # src\api\app.py:268
+health  # src\api\app.py:270
 library  # src\api\routes\policies.py:174
 list_categories  # src\api\routes\domains.py:72
 list_domains  # src\api\routes\domains.py:16
@@ -57,7 +57,7 @@ list_tips  # src\api\routes\leads.py:67
 policy_stats  # src\api\routes\policies.py:262
 reload_config_route  # src\api\routes\config_admin.py:14
 remove_api_key  # src\api\routes\settings.py:228
-root  # src\api\app.py:250
+root  # src\api\app.py:252
 run_agent  # src\api\routes\agent.py:37
 run_schedule_now  # src\api\routes\schedules.py:197
 save_api_key  # src\api\routes\settings.py:112
@@ -67,6 +67,7 @@ search_places  # src\api\routes\search.py:19
 search_plan  # src\api\routes\search.py:25
 search_policies_text  # src\api\routes\policies.py:140
 serve_frontend  # src\api\static_site.py:56
+signals_status  # src\api\routes\signals.py:16
 start_scan  # src\api\routes\scans.py:27
 submit_tip  # src\api\routes\leads.py:80
 update_cost_settings  # src\api\routes\settings.py:185

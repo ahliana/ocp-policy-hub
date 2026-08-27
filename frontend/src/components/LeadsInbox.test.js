@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import LeadsInbox from './LeadsInbox';
+import { setAdminToken } from '../utils/adminAuth';
 
 const URL_TIP = {
   lead_id: 'tip-url-1',
@@ -20,10 +21,19 @@ const NOTE_ONLY_TIP = {
   status: 'new',
 };
 
-function mockFetch(tips = [URL_TIP, NOTE_ONLY_TIP]) {
+function mockFetch(tips = [URL_TIP, NOTE_ONLY_TIP], { signalsStatus } = {}) {
   return jest.fn(async (url, options = {}) => {
     const s = String(url);
     const method = options.method || 'GET';
+    if (s.includes('/api/signals/status')) {
+      if (signalsStatus === undefined) {
+        return { ok: false, status: 403, json: async () => ({}) };
+      }
+      if (signalsStatus.status && signalsStatus.status !== 200) {
+        return { ok: false, status: signalsStatus.status, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => signalsStatus.body, headers: options.headers };
+    }
     if (s.includes('/api/tips') && method === 'GET') {
       return { ok: true, json: async () => ({ leads: tips, count: tips.length }) };
     }
@@ -42,6 +52,7 @@ function mockFetch(tips = [URL_TIP, NOTE_ONLY_TIP]) {
 
 afterEach(() => {
   jest.restoreAllMocks();
+  setAdminToken(null);
 });
 
 describe('LeadsInbox uses Tips vocabulary and /api/tips', () => {
@@ -281,5 +292,79 @@ describe('LeadsInbox chase outcomes', () => {
 
     await screen.findByText('Sweden Heat Rule');
     expect(screen.queryByText('Should not appear')).not.toBeInTheDocument();
+  });
+});
+
+describe('LeadsInbox last-sweep status line (WP-43 UI)', () => {
+  const OK_STATUS = {
+    ran_at: '2026-08-20T06:00:00Z',
+    feeds_tried: 5,
+    feeds_ok: 4,
+    feeds_failed: 1,
+    failures: [{ feed: 'Denmark RSS', reason: 'timed out' }],
+    items_found: 12,
+    kept_after_triage: 6,
+    added_after_dedupe: 3,
+  };
+
+  it('renders the last-sweep sentence above the tips list', async () => {
+    global.fetch = mockFetch([URL_TIP], { signalsStatus: { body: OK_STATUS } });
+    render(<LeadsInbox />);
+
+    const sentence = await screen.findByText(/Last sweep:/);
+    expect(sentence).toHaveTextContent('3 new tips');
+    expect(sentence).toHaveTextContent('4 feeds ok');
+    expect(sentence).toHaveTextContent('1 failed');
+  });
+
+  it('shows an InfoHotspot listing each feed failure and how to fix it', async () => {
+    global.fetch = mockFetch([URL_TIP], { signalsStatus: { body: OK_STATUS } });
+    render(<LeadsInbox />);
+
+    await screen.findByText(/Last sweep:/);
+    const hotspotButton = screen.getByRole('button', { name: 'Which feeds failed' });
+    fireEvent.click(hotspotButton);
+    expect(screen.getByText(/Denmark RSS: timed out/)).toBeInTheDocument();
+    expect(screen.getByText(/turn the feed off in configuration/i)).toBeInTheDocument();
+  });
+
+  it('does not show a failure hotspot when no feeds failed', async () => {
+    global.fetch = mockFetch([URL_TIP], {
+      signalsStatus: { body: { ...OK_STATUS, feeds_failed: 0, failures: [] } },
+    });
+    render(<LeadsInbox />);
+
+    await screen.findByText(/Last sweep:/);
+    expect(screen.queryByRole('button', { name: 'Which feeds failed' })).not.toBeInTheDocument();
+  });
+
+  it('shows "No sweep recorded yet." when the record is empty', async () => {
+    global.fetch = mockFetch([URL_TIP], { signalsStatus: { body: {} } });
+    render(<LeadsInbox />);
+
+    await screen.findByText('No sweep recorded yet.');
+    expect(screen.queryByText(/Last sweep:/)).not.toBeInTheDocument();
+  });
+
+  it('sends the admin header on the signals/status fetch', async () => {
+    setAdminToken('secret-token');
+    const fetchMock = mockFetch([URL_TIP], { signalsStatus: { body: OK_STATUS } });
+    global.fetch = fetchMock;
+    render(<LeadsInbox />);
+
+    await screen.findByText(/Last sweep:/);
+    const statusCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/signals/status'));
+    expect(statusCall).toBeDefined();
+    expect(statusCall[1]?.headers?.['X-Admin-Token']).toBe('secret-token');
+  });
+
+  it('renders nothing (not an error) when the status fetch 403s (not signed in)', async () => {
+    global.fetch = mockFetch([URL_TIP], { signalsStatus: { status: 403 } });
+    render(<LeadsInbox />);
+
+    await screen.findByText('Denmark heat mandate');
+    expect(screen.queryByText(/Last sweep:/)).not.toBeInTheDocument();
+    expect(screen.queryByText('No sweep recorded yet.')).not.toBeInTheDocument();
+    expect(screen.queryByText(/error/i)).not.toBeInTheDocument();
   });
 });

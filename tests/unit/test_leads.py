@@ -96,6 +96,72 @@ class TestNoteOnlyLeadDedupe:
         assert len(store.list()) == 2
 
 
+class TestUrlVariantDedupe:
+    """WP-42: dedupe keys normalize URL variants (see core.urls.normalize_url)."""
+
+    @pytest.mark.medium
+    def test_utm_variant_of_stored_url_dedupes(self, store):
+        store.add_leads([_lead(url="https://news.example/article")])
+        added = store.add_leads(
+            [_lead(url="https://news.example/article?utm_source=newsletter",
+                    title="Same story, tracked link")]
+        )
+        assert added == 0
+        assert len(store.list()) == 1
+
+    @pytest.mark.medium
+    def test_trailing_slash_and_scheme_variants_dedupe(self, store):
+        store.add_leads([_lead(url="https://news.example/article")])
+        added = store.add_leads([
+            _lead(url="https://news.example/article/", title="Trailing slash"),
+            _lead(url="HTTPS://NEWS.EXAMPLE/article", title="Different case host"),
+        ])
+        assert added == 0
+        assert len(store.list()) == 1
+
+    @pytest.mark.medium
+    def test_pre_existing_raw_key_duplicates_exactly_once_then_dedupes(self, tmp_path):
+        """Boundary documented in _dedupe_key: a row stored before this
+        normalization pass keeps its raw-URL key. The first normalized
+        variant collides with nothing (one honest duplicate); every
+        variant after that shares the now-normalized key and dedupes.
+        """
+        import json
+
+        store = LeadStore(data_dir=str(tmp_path))
+        raw_key_url = "https://news.example/article?utm_source=old-run"
+        # Simulate a row inserted under the pre-normalization scheme: the
+        # dedupe key column holds the untouched raw URL.
+        store._conn.execute(
+            "INSERT INTO leads (lead_id, source_url, status, raw) VALUES (?, ?, ?, ?)",
+            (
+                "legacy1",
+                raw_key_url,
+                "new",
+                json.dumps({
+                    "lead_id": "legacy1", "title": "Legacy row",
+                    "source_url": raw_key_url, "snippet": "", "jurisdiction_guess": "",
+                    "origin": "news", "found_at": "2026-01-01T00:00:00+00:00",
+                    "status": "new", "policy_url": None, "chased_at": None,
+                    "chase_outcome": None, "chase_error": None,
+                }),
+            ),
+        )
+        store._conn.commit()
+
+        added_first = store.add_leads(
+            [_lead(url="https://news.example/article", title="Normalized variant")]
+        )
+        assert added_first == 1  # documented one-time duplicate
+        assert len(store.list()) == 2
+
+        added_second = store.add_leads(
+            [_lead(url="https://news.example/article/", title="Another normalized variant")]
+        )
+        assert added_second == 0  # now dedupes against the normalized row
+        assert len(store.list()) == 2
+
+
 class TestRecordChase:
     """record_chase() persists a chase attempt's outcome and timing."""
 
