@@ -62,6 +62,7 @@ function AgentPanel({
     });
     const {
         costStatus, costEstimateText, costEstimate, domainCount,
+        standardEstimate, deepEstimate,
     } = useCostEstimate({
         selectedRegions,
         mode,
@@ -192,6 +193,8 @@ function AgentPanel({
                             costStatus={costStatus}
                             costEstimateText={costEstimateText}
                             costEstimate={costEstimate}
+                            standardEstimate={standardEstimate}
+                            deepEstimate={deepEstimate}
                             sourceCount={domainCount}
                             isBusy={isBusy}
                             hasApiKey={hasApiKey}

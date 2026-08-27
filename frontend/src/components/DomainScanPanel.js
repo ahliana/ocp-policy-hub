@@ -1,9 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import FormGroup from '@mui/material/FormGroup';
 import Tooltip from '@mui/material/Tooltip';
+import useScopePreview from '../hooks/useScopePreview';
 import { describeSelectionLabels, splitSelection } from '../utils/scanTargets';
+import CostFunnelDiagram from './CostFunnelDiagram';
+import HelpNote from './HelpNote';
 import ModeSelector from './ModeSelector';
 import RegionSelector from './RegionSelector';
 
@@ -37,6 +40,19 @@ function channelBreakdownLine(channelId, channel) {
         + `(range ${formatUsd(channel.cost_low_usd)}-${formatUsd(channel.cost_high_usd)})`;
 }
 
+// A click that lands on a HelpNote's summary while it is still closed is
+// about to open it - this is the "open" signal WP-28's scope preview waits
+// for before it fetches anything. (The native <details> "toggle" event would
+// be the obvious hook, but it fires as an async, unlisenable-in-jsdom task in
+// some environments, so this reads the pre-toggle DOM state on the click
+// itself instead - reliable in both real browsers and the test suite.)
+function isOpeningClick(event) {
+    const summary = event.target.closest('.help-note-summary');
+    if (!summary) return false;
+    const details = summary.closest('details');
+    return Boolean(details) && !details.open;
+}
+
 function DomainScanPanel({
     selectedRegions,
     onSelectionChange,
@@ -47,6 +63,8 @@ function DomainScanPanel({
     costStatus,
     costEstimateText,
     costEstimate,
+    standardEstimate,
+    deepEstimate,
     sourceCount,
     isBusy,
     hasApiKey,
@@ -57,11 +75,17 @@ function DomainScanPanel({
     onScan,
     onStop,
 }) {
+    const [isScopePreviewActive, setIsScopePreviewActive] = useState(false);
+
     const handleChannelToggle = (channelId, checked) => {
         const nextChannels = checked
             ? [...channels, channelId]
             : channels.filter((id) => id !== channelId);
         onChannelsChange(nextChannels);
+    };
+
+    const handleScopePreviewAreaClick = (event) => {
+        if (isOpeningClick(event)) setIsScopePreviewActive(true);
     };
 
     // What-you-launch-is-unambiguous summary, kept directly above the
@@ -70,11 +94,11 @@ function DomainScanPanel({
     // count - the single source of truth); while it's loading/idle/absent,
     // fall back to the number of scope entries currently selected so the
     // line still shows a number rather than "unknown".
+    const scopeTargets = splitSelection(selectedRegions || []).targets;
+    const hasScope = scopeTargets.length > 0;
     const selectionLabels = describeSelectionLabels(selectedRegions);
     const scopeText = selectionLabels.length > 0 ? selectionLabels.join(', ') : 'nothing selected';
-    const resolvedSourceCount = sourceCount != null
-        ? sourceCount
-        : splitSelection(selectedRegions || []).targets.length;
+    const resolvedSourceCount = sourceCount != null ? sourceCount : scopeTargets.length;
     const sourceLabel = `${resolvedSourceCount} source${resolvedSourceCount === 1 ? '' : 's'}`;
     const scanScopeSummary = `Scanning: ${scopeText} - ${sourceLabel} - ${costEstimateText}`;
 
@@ -87,6 +111,10 @@ function DomainScanPanel({
             .filter(([, channel]) => Boolean(channel))
         : [];
     const hasCostBreakdown = channelEntries.length > 0;
+
+    // WP-28: "Where will this search?" - the resolved source list for the
+    // current selection, fetched lazily (only once the note is opened).
+    const scopePreview = useScopePreview({ selectedRegions, active: isScopePreviewActive });
 
     return (
         <div className="domain-scan" aria-label="Domain scan">
@@ -107,6 +135,9 @@ function DomainScanPanel({
                 <ModeSelector
                     value={mode}
                     onChange={onModeChange}
+                    hasScope={hasScope}
+                    standardEstimate={standardEstimate}
+                    deepEstimate={deepEstimate}
                 />
                 <div className="channels-group" role="group" aria-label="Sources to check">
                     <p className="text-block-small channels-heading">Sources to check</p>
@@ -136,49 +167,86 @@ function DomainScanPanel({
                     </output>
                 </Tooltip>
             </div>
-            <p className="scan-scope-summary" aria-live="polite">{scanScopeSummary}</p>
-            {hasCostBreakdown && (
-                <details className="cost-breakdown">
-                    <summary>Why this price?</summary>
-                    <ul className="cost-breakdown-channels">
-                        {channelEntries.map(([channelId, channel]) => (
-                            <li key={channelId}>{channelBreakdownLine(channelId, channel)}</li>
-                        ))}
-                    </ul>
-                    <p className="cost-breakdown-auditor">
-                        Report generation: {formatUsd(costEstimate.auditor_cost_usd)}
-                    </p>
-                    {Array.isArray(costEstimate.assumptions) && costEstimate.assumptions.length > 0 && (
-                        <div className="cost-breakdown-assumptions">
-                            <p className="cost-breakdown-assumptions-heading">What we assumed</p>
-                            <ul>
-                                {costEstimate.assumptions.map((assumption) => (
-                                    <li key={assumption}>{assumption}</li>
+            <div className="scan-decision">
+                <p className="scan-scope-summary" aria-live="polite">{scanScopeSummary}</p>
+                {hasCostBreakdown && (
+                    <HelpNote label="Why this price?" className="cost-breakdown">
+                        <ul className="cost-breakdown-channels">
+                            {channelEntries.map(([channelId, channel]) => (
+                                <li key={channelId}>{channelBreakdownLine(channelId, channel)}</li>
+                            ))}
+                        </ul>
+                        <p className="cost-breakdown-auditor">
+                            Report generation: {formatUsd(costEstimate.auditor_cost_usd)}
+                        </p>
+                        {Array.isArray(costEstimate.assumptions) && costEstimate.assumptions.length > 0 && (
+                            <div className="cost-breakdown-assumptions">
+                                <p className="cost-breakdown-assumptions-heading">What we assumed</p>
+                                <ul>
+                                    {costEstimate.assumptions.map((assumption) => (
+                                        <li key={assumption}>{assumption}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                        <HelpNote label="See it as a picture" className="cost-funnel-note">
+                            <CostFunnelDiagram estimate={costEstimate} />
+                        </HelpNote>
+                    </HelpNote>
+                )}
+                {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
+                <div className="scope-preview-area" onClick={handleScopePreviewAreaClick}>
+                    <HelpNote label="Where will this search?" className="scope-preview">
+                        {scopePreview.status === 'empty' && (
+                            <p>Pick a place or sources first.</p>
+                        )}
+                        {scopePreview.status === 'loading' && (
+                            <p>Loading sources...</p>
+                        )}
+                        {scopePreview.status === 'error' && (
+                            <p>Could not load the source list.</p>
+                        )}
+                        {scopePreview.status === 'ready' && (
+                            <>
+                                {scopePreview.groups.map((group) => (
+                                    <div key={group.id} className="scope-preview-group">
+                                        <p className="scope-preview-group-heading">
+                                            {group.label} ({group.entries.length})
+                                        </p>
+                                        <ul>
+                                            {group.entries.map((entry) => (
+                                                <li key={entry.id}>{entry.name} - {entry.region}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
                                 ))}
-                            </ul>
-                        </div>
-                    )}
-                </details>
-            )}
-            <div className="agent-action-row">
-                <button
-                    type="button"
-                    className="scan-button button"
-                    onClick={onScan}
-                    disabled={isBusy || selectedRegions.length === 0 || !hasApiKey}
-                >
-                    {isQueueRunning
-                        ? `Queued (${queuedScanCount})`
-                        : isScanRequestRunning || isScanRunning ? 'Scan running' : 'Scan'}
-                </button>
-                <button
-                    type="button"
-                    className="stop-scan-button button"
-                    onClick={onStop}
-                    disabled={!isScanRunning && !isQueueRunning && !isScanRequestRunning}
-                >
-                    Stop scan
-                </button>
+                                <p className="scope-preview-total">
+                                    {scopePreview.totalCount} source{scopePreview.totalCount === 1 ? '' : 's'} total
+                                </p>
+                            </>
+                        )}
+                    </HelpNote>
+                </div>
+                <div className="agent-action-row">
+                    <button
+                        type="button"
+                        className="scan-button button"
+                        onClick={onScan}
+                        disabled={isBusy || selectedRegions.length === 0 || !hasApiKey}
+                    >
+                        {isQueueRunning
+                            ? `Queued (${queuedScanCount})`
+                            : isScanRequestRunning || isScanRunning ? 'Scan running' : 'Scan'}
+                    </button>
+                    <button
+                        type="button"
+                        className="stop-scan-button button"
+                        onClick={onStop}
+                        disabled={!isScanRunning && !isQueueRunning && !isScanRequestRunning}
+                    >
+                        Stop scan
+                    </button>
+                </div>
             </div>
             {!hasApiKey && (
                 <p className="text-block-small">

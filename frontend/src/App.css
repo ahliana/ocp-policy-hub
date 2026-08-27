@@ -254,7 +254,6 @@ select,
 .agent-action-row {
   display: flex;
   gap: 10px;
-  margin-top: auto;
   padding-top: 20px;
   flex-wrap: wrap;
 }
@@ -790,6 +789,91 @@ select,
   padding: 6px 0;
 }
 
+/* --- Mode cards (WP-27) --- */
+
+.mode-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid #a3b1da;
+  border-radius: 999px;
+  background-color: #eef2f7;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+/* --- HelpNote (WP-37) --- */
+
+.help-note {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.help-note-summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #334155;
+}
+
+.help-note-body {
+  margin-top: 8px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+/* --- InfoHotspot toggletip (WP-37) --- */
+
+.info-hotspot {
+  position: relative;
+  display: inline-block;
+  margin-left: 4px;
+}
+
+.info-hotspot-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid #d7dee8;
+  border-radius: 50%;
+  background-color: #eef2f7;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.info-hotspot-trigger:hover {
+  background-color: #e2e8f0;
+}
+
+.info-hotspot-trigger:focus-visible {
+  outline: 2px solid #4d7c0f;
+  outline-offset: 2px;
+}
+
+.info-hotspot-tip {
+  position: absolute;
+  z-index: 5;
+  top: 24px;
+  left: 0;
+  width: max-content;
+  max-width: 280px;
+  padding: 8px 10px;
+  border: 1px solid #d7dee8;
+  border-radius: 6px;
+  background-color: #ffffff;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
 /* --- Cost breakdown / "Why this price?" (WP-26) --- */
 
 .cost-breakdown {
@@ -824,6 +908,53 @@ select,
   margin: 10px 0 2px;
   font-weight: 600;
   color: #334155;
+}
+
+/* --- Scan decision group (WP-29) --- */
+
+.scan-decision {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.scope-preview-group {
+  margin-top: 8px;
+}
+
+.scope-preview-group-heading {
+  margin: 0 0 2px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.scope-preview-area ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.scope-preview-area li {
+  margin-bottom: 2px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.scope-preview-total {
+  margin: 8px 0 0;
+  font-weight: 600;
+  color: #475569;
+}
+
+/* --- Cost funnel diagram (WP-38) --- */
+
+.cost-funnel-diagram {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  height: auto;
+  margin-top: 8px;
 }
 
 /* --- Review inbox --- */

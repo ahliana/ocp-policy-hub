@@ -83,6 +83,12 @@ function formatCostEstimateText(costStatus, costEstimate) {
 function useCostEstimate({ selectedRegions, mode }) {
     const [costEstimate, setCostEstimate] = useState(null);
     const [costStatus, setCostStatus] = useState('idle');
+    // WP-27: the mode cards (ModeSelector) show a real price on the Standard
+    // and Deep cards side by side, so both estimates are fetched together -
+    // one debounced window, two parallel calls - rather than only the
+    // currently-selected mode's estimate.
+    const [standardEstimate, setStandardEstimate] = useState(null);
+    const [deepEstimate, setDeepEstimate] = useState(null);
 
     // A stable, content-derived key rather than the selectedRegions array
     // reference itself - callers (and this hook's own tests) often pass a
@@ -97,6 +103,8 @@ function useCostEstimate({ selectedRegions, mode }) {
 
         if (mode === 'discover') {
             setCostEstimate(null);
+            setStandardEstimate(null);
+            setDeepEstimate(null);
             setCostStatus('discover');
             return () => {
                 isCurrent = false;
@@ -105,6 +113,8 @@ function useCostEstimate({ selectedRegions, mode }) {
 
         if (targets.length === 0) {
             setCostEstimate(null);
+            setStandardEstimate(null);
+            setDeepEstimate(null);
             setCostStatus(selectedRegions.length === 0 ? 'idle' : 'filters_only');
             return () => {
                 isCurrent = false;
@@ -113,31 +123,50 @@ function useCostEstimate({ selectedRegions, mode }) {
 
         setCostStatus('loading');
         const domains = targets.map(normalizeTarget).join(',');
+        const hasFilters = categories.length > 0 || tags.length > 0;
+
+        const buildEstimate = async (response) => {
+            if (!response.ok) return null;
+            const data = await response.json();
+            return { ...data, target_count: data.domain_count, has_filters: hasFilters };
+        };
 
         // Debounced 300ms - selection/mode changes within that window coalesce
-        // into one call instead of firing a request per click while a user is
-        // still assembling their scope.
+        // into one pair of calls instead of firing a request per click while a
+        // user is still assembling their scope.
         const timerId = setTimeout(() => {
-            getCostEstimate(domains, mode === 'deep')
-                .then(async (response) => {
+            Promise.all([
+                getCostEstimate(domains, false),
+                getCostEstimate(domains, true),
+            ])
+                .then(async ([standardResponse, deepResponse]) => {
                     if (!isCurrent) return;
-                    if (!response.ok) {
+
+                    const selectedResponse = mode === 'deep' ? deepResponse : standardResponse;
+                    if (!selectedResponse.ok) {
                         setCostEstimate(null);
-                        setCostStatus(errorStatusForResponse(response.status));
+                        setStandardEstimate(null);
+                        setDeepEstimate(null);
+                        setCostStatus(errorStatusForResponse(selectedResponse.status));
                         return;
                     }
-                    const data = await response.json();
+
+                    const [standardData, deepData] = await Promise.all([
+                        buildEstimate(standardResponse),
+                        buildEstimate(deepResponse),
+                    ]);
                     if (!isCurrent) return;
-                    setCostEstimate({
-                        ...data,
-                        target_count: data.domain_count,
-                        has_filters: categories.length > 0 || tags.length > 0,
-                    });
+
+                    setStandardEstimate(standardData);
+                    setDeepEstimate(deepData);
+                    setCostEstimate(mode === 'deep' ? deepData : standardData);
                     setCostStatus('ready');
                 })
                 .catch(() => {
                     if (!isCurrent) return;
                     setCostEstimate(null);
+                    setStandardEstimate(null);
+                    setDeepEstimate(null);
                     setCostStatus('error');
                 });
         }, 300);
@@ -166,6 +195,12 @@ function useCostEstimate({ selectedRegions, mode }) {
         // per-channel breakdown and assumptions list that costEstimateText
         // doesn't summarize. null outside the ready state.
         costEstimate: costStatus === 'ready' ? costEstimate : null,
+        // WP-27: the standard (deep=false) and deep (deep=true) estimates,
+        // fetched together regardless of which mode is currently selected -
+        // ModeSelector's cards show both prices side by side. null outside
+        // the ready state, same as costEstimate.
+        standardEstimate: costStatus === 'ready' ? standardEstimate : null,
+        deepEstimate: costStatus === 'ready' ? deepEstimate : null,
     };
 }
 

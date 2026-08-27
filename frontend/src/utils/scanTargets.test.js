@@ -1,4 +1,6 @@
-import { DEFAULT_CHANNELS, buildChannels, describeSelectionLabels, formatLabel } from './scanTargets';
+import {
+  DEFAULT_CHANNELS, buildChannels, describeSelectionLabels, domainChannel, formatLabel,
+} from './scanTargets';
 
 describe('formatLabel', () => {
   it('applies known overrides', () => {
@@ -70,6 +72,25 @@ describe('buildChannels', () => {
 
   it('falls back to crawl-only when channels is undefined', () => {
     expect(buildChannels(undefined)).toEqual(['crawl']);
+  });
+});
+
+describe('domainChannel (WP-28)', () => {
+  it('classifies a domain with no source_type as crawl', () => {
+    expect(domainChannel({ id: 'bmwk_de' })).toBe('crawl');
+  });
+
+  it('classifies an explicit source_type: crawl as crawl', () => {
+    expect(domainChannel({ id: 'bmwk_de', source_type: 'crawl' })).toBe('crawl');
+  });
+
+  it('classifies source_type: eurlex_nim as transposition', () => {
+    expect(domainChannel({ id: 'eurlex_nim_tracker', source_type: 'eurlex_nim' })).toBe('transposition');
+  });
+
+  it('classifies any other structured source_type as law_apis', () => {
+    expect(domainChannel({ id: 'legiscan_api', source_type: 'legiscan' })).toBe('law_apis');
+    expect(domainChannel({ id: 'riksdagen_api', source_type: 'riksdagen' })).toBe('law_apis');
   });
 });
 

@@ -1,4 +1,6 @@
-import { render, screen, act } from '@testing-library/react';
+import {
+  render, screen, act, fireEvent, waitFor, within,
+} from '@testing-library/react';
 import DomainScanPanel from './DomainScanPanel';
 
 // RegionSelector fetches /api/groups etc. on mount - stub fetch so it
@@ -95,11 +97,11 @@ describe('DomainScanPanel scan-scope summary (WP-6)', () => {
     expect(screen.getByText(/^Scanning:.*\$1\.23 \(5 targets\)$/)).toBeInTheDocument();
   });
 
-  it('keeps the summary line adjacent to the Scan button in the DOM', async () => {
+  it('keeps the summary line grouped with the Scan button (WP-29 scan-decision)', async () => {
     await renderPanel({ selectedRegions: ['group:eu'] });
     const summary = screen.getByText(/^Scanning:/);
     const scanButton = screen.getByRole('button', { name: 'Scan', exact: true });
-    expect(summary.nextElementSibling).toContainElement(scanButton);
+    expect(summary.closest('.scan-decision')).toContainElement(scanButton);
   });
 });
 
@@ -108,6 +110,9 @@ const READY_ESTIMATE = {
   estimated_cost_low_usd: 4.2,
   estimated_cost_high_usd: 9.1,
   domain_count: 5,
+  estimated_pages: 500,
+  estimated_screening_calls: 75,
+  estimated_analysis_calls: 30,
   auditor_cost_usd: 0.35,
   assumptions: [
     'Assumes 100 pages per government website (measured from recent scans).',
@@ -213,5 +218,159 @@ describe('DomainScanPanel "Why this price?" cost breakdown (WP-26)', () => {
     expect(text).not.toMatch(/\bLLM\b/i);
     expect(text).not.toMatch(/\btoken\b/i);
     expect(text).not.toMatch(/\bAPI\b/);
+  });
+});
+
+describe('DomainScanPanel cost funnel diagram (WP-38)', () => {
+  it('renders the funnel inside a nested, closed-by-default "See it as a picture" note, with the estimate\'s numbers', async () => {
+    await renderPanel({
+      selectedRegions: ['group:eu'],
+      costStatus: 'ready',
+      costEstimate: READY_ESTIMATE,
+    });
+
+    const nestedSummary = screen.getByText('See it as a picture');
+    const nestedDetails = nestedSummary.closest('details');
+    expect(nestedDetails).not.toHaveAttribute('open');
+
+    const outerDetails = screen.getByText('Why this price?').closest('details');
+    expect(outerDetails).toContainElement(nestedDetails);
+
+    expect(within(nestedDetails).getByRole('img')).toBeInTheDocument();
+    expect(within(nestedDetails).getByText('5')).toBeInTheDocument();
+    expect(within(nestedDetails).getByText('~500')).toBeInTheDocument();
+    expect(within(nestedDetails).getByText('~75')).toBeInTheDocument();
+    expect(within(nestedDetails).getByText('~30')).toBeInTheDocument();
+  });
+
+  it('has an aria-label summarizing the flow', async () => {
+    await renderPanel({
+      selectedRegions: ['group:eu'],
+      costStatus: 'ready',
+      costEstimate: READY_ESTIMATE,
+    });
+
+    expect(screen.getByRole('img')).toHaveAttribute(
+      'aria-label',
+      expect.stringContaining('5 sources'),
+    );
+  });
+
+  it('is absent when there is no ready estimate', async () => {
+    await renderPanel({ selectedRegions: ['group:eu'], costEstimate: null, costStatus: 'idle' });
+    expect(screen.queryByText('See it as a picture')).not.toBeInTheDocument();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+});
+
+describe('DomainScanPanel scan-decision grouping (WP-29)', () => {
+  it('groups the scope summary, both HelpNotes, and the Scan/Stop buttons under one container', async () => {
+    await renderPanel({
+      selectedRegions: ['group:eu'],
+      costStatus: 'ready',
+      costEstimate: READY_ESTIMATE,
+    });
+
+    const group = screen.getByText(/^Scanning:/).closest('.scan-decision');
+    expect(group).not.toBeNull();
+    expect(group).toContainElement(screen.getByText('Why this price?'));
+    expect(group).toContainElement(screen.getByText('Where will this search?'));
+    expect(group).toContainElement(screen.getByRole('button', { name: 'Scan', exact: true }));
+    expect(group).toContainElement(screen.getByRole('button', { name: 'Stop scan' }));
+  });
+
+  it('the "Where will this search?" note is closed by default', async () => {
+    await renderPanel({ selectedRegions: ['group:eu'] });
+    const details = screen.getByText('Where will this search?').closest('details');
+    expect(details).not.toHaveAttribute('open');
+  });
+});
+
+describe('DomainScanPanel scope preview - "Where will this search?" (WP-28)', () => {
+  const GERMANY_DOMAINS = [
+    {
+      id: 'gesetze_enefg',
+      name: 'Germany Federal Law Database - EnEfG',
+      region: ['eu', 'eu_central', 'germany'],
+      source_type: 'crawl',
+    },
+    {
+      id: 'legiscan_api',
+      name: 'LegiScan API (US state legislation)',
+      region: ['us'],
+      source_type: 'legiscan',
+    },
+  ];
+
+  function mockFetchWithDomains() {
+    return jest.fn(async (url) => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === '/api/domains' && parsed.searchParams.get('group') === 'germany') {
+        return { ok: true, json: async () => ({ domains: GERMANY_DOMAINS }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+  }
+
+  it('does not fetch the source list before the note is opened', async () => {
+    const fetchMock = mockFetchWithDomains();
+    global.fetch = fetchMock;
+    await renderPanel({ selectedRegions: ['group:germany'] });
+
+    const domainCalls = fetchMock.mock.calls.filter(
+      ([url]) => new URL(String(url)).pathname === '/api/domains',
+    );
+    expect(domainCalls).toHaveLength(0);
+  });
+
+  it('fetches the resolved source list lazily, once the note is opened', async () => {
+    const fetchMock = mockFetchWithDomains();
+    global.fetch = fetchMock;
+    await renderPanel({ selectedRegions: ['group:germany'] });
+
+    fireEvent.click(screen.getByText('Where will this search?'));
+
+    await waitFor(() => {
+      const domainCalls = fetchMock.mock.calls.filter(
+        ([url]) => new URL(String(url)).pathname === '/api/domains',
+      );
+      expect(domainCalls.length).toBeGreaterThan(0);
+    });
+  });
+
+  it('groups resolved sources under plain-language channel headings with per-group and total counts', async () => {
+    global.fetch = mockFetchWithDomains();
+    await renderPanel({ selectedRegions: ['group:germany'] });
+
+    fireEvent.click(screen.getByText('Where will this search?'));
+
+    expect(await screen.findByText('Government websites (1)')).toBeInTheDocument();
+    expect(screen.getByText('Germany Federal Law Database - EnEfG - Germany')).toBeInTheDocument();
+    expect(screen.getByText('Law databases (1)')).toBeInTheDocument();
+    expect(screen.getByText('LegiScan API (US state legislation) - United States')).toBeInTheDocument();
+    expect(screen.getByText('2 sources total')).toBeInTheDocument();
+  });
+
+  it('the total agrees with the cost estimate\'s domain_count when both are present', async () => {
+    global.fetch = mockFetchWithDomains();
+    await renderPanel({
+      selectedRegions: ['group:germany'],
+      costStatus: 'ready',
+      costEstimate: { estimated_cost_usd: 1, domain_count: 2, target_count: 2 },
+    });
+
+    fireEvent.click(screen.getByText('Where will this search?'));
+
+    const totalLine = await screen.findByText('2 sources total');
+    expect(totalLine).toBeInTheDocument();
+  });
+
+  it('shows "Pick a place or sources first." when nothing is selected', async () => {
+    global.fetch = mockFetchWithDomains();
+    await renderPanel({ selectedRegions: [] });
+
+    fireEvent.click(screen.getByText('Where will this search?'));
+
+    expect(await screen.findByText('Pick a place or sources first.')).toBeInTheDocument();
   });
 });

@@ -24,6 +24,15 @@ function jsonResponse(status, body) {
   };
 }
 
+// WP-27: every non-discover selection now fetches BOTH the standard
+// (deep=false) and deep (deep=true) estimate in the same debounced window,
+// so a plain response-per-call mock (used by most tests below, which don't
+// care which of the pair they're answering) resolves to the same body for
+// both calls.
+function deepParam(url) {
+  return new URL(String(url)).searchParams.get('deep');
+}
+
 afterEach(() => {
   jest.restoreAllMocks();
   setAdminToken('');
@@ -42,7 +51,7 @@ describe('useCostEstimate', () => {
     expect(options.headers['X-Admin-Token']).toBe('secret-token');
   });
 
-  it('makes exactly one aggregated call for a multi-region selection', async () => {
+  it('makes exactly one aggregated call per channel (standard + deep) for a multi-region selection', async () => {
     const fetchMock = jest.fn(async () => jsonResponse(200, ESTIMATE_RESPONSE));
     global.fetch = fetchMock;
 
@@ -52,45 +61,121 @@ describe('useCostEstimate', () => {
     ));
 
     await waitFor(() => expect(result.current.costStatus).toBe('ready'));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('joins the selected targets into a single comma-separated domains param', async () => {
+  it('joins the selected targets into a single comma-separated domains param on every call', async () => {
     const fetchMock = jest.fn(async (url) => {
       expect(new URL(String(url)).searchParams.get('domains')).toBe('california,legiscan_api');
       return jsonResponse(200, ESTIMATE_RESPONSE);
     });
     global.fetch = fetchMock;
 
-    renderHook(() => (
+    const { result } = renderHook(() => (
       useCostEstimate({ selectedRegions: ['region:california', 'legiscan_api'], mode: 'standard' })
     ));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(result.current.costStatus).toBe('ready'));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('requests deep=true when in deep mode', async () => {
-    const fetchMock = jest.fn(async (url) => {
-      expect(new URL(String(url)).searchParams.get('deep')).toBe('true');
-      return jsonResponse(200, ESTIMATE_RESPONSE);
+  describe('parallel standard + deep fetch (WP-27)', () => {
+    it('fires one deep=false call and one deep=true call in the same window, regardless of the selected mode', async () => {
+      const fetchMock = jest.fn(async () => jsonResponse(200, ESTIMATE_RESPONSE));
+      global.fetch = fetchMock;
+
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('ready'));
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const params = fetchMock.mock.calls.map(([url]) => deepParam(url));
+      expect(params.sort()).toEqual([null, 'true'].sort()); // one omits deep, one sets deep=true
     });
-    global.fetch = fetchMock;
 
-    renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'deep' }));
+    it('fires the same pair of calls in deep mode too', async () => {
+      const fetchMock = jest.fn(async () => jsonResponse(200, ESTIMATE_RESPONSE));
+      global.fetch = fetchMock;
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-  });
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'deep' }));
 
-  it('does not send deep=true in standard mode', async () => {
-    const fetchMock = jest.fn(async (url) => {
-      expect(new URL(String(url)).searchParams.get('deep')).toBeNull();
-      return jsonResponse(200, ESTIMATE_RESPONSE);
+      await waitFor(() => expect(result.current.costStatus).toBe('ready'));
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const params = fetchMock.mock.calls.map(([url]) => deepParam(url));
+      expect(params.sort()).toEqual([null, 'true'].sort());
     });
-    global.fetch = fetchMock;
 
-    renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+    it('exposes standardEstimate and deepEstimate once ready', async () => {
+      const fetchMock = jest.fn(async (url) => (
+        deepParam(url) === 'true'
+          ? jsonResponse(200, { ...ESTIMATE_RESPONSE, estimated_cost_usd: 9.0 })
+          : jsonResponse(200, { ...ESTIMATE_RESPONSE, estimated_cost_usd: 4.2 })
+      ));
+      global.fetch = fetchMock;
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('ready'));
+      expect(result.current.standardEstimate.estimated_cost_usd).toBe(4.2);
+      expect(result.current.deepEstimate.estimated_cost_usd).toBe(9.0);
+    });
+
+    it('costEstimate (selected mode) matches standardEstimate in standard mode', async () => {
+      const fetchMock = jest.fn(async (url) => (
+        deepParam(url) === 'true'
+          ? jsonResponse(200, { ...ESTIMATE_RESPONSE, estimated_cost_usd: 9.0 })
+          : jsonResponse(200, { ...ESTIMATE_RESPONSE, estimated_cost_usd: 4.2 })
+      ));
+      global.fetch = fetchMock;
+
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('ready'));
+      expect(result.current.costEstimate.estimated_cost_usd).toBe(4.2);
+    });
+
+    it('costEstimate (selected mode) matches deepEstimate in deep mode', async () => {
+      const fetchMock = jest.fn(async (url) => (
+        deepParam(url) === 'true'
+          ? jsonResponse(200, { ...ESTIMATE_RESPONSE, estimated_cost_usd: 9.0 })
+          : jsonResponse(200, { ...ESTIMATE_RESPONSE, estimated_cost_usd: 4.2 })
+      ));
+      global.fetch = fetchMock;
+
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'deep' }));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('ready'));
+      expect(result.current.costEstimate.estimated_cost_usd).toBe(9.0);
+    });
+
+    it('standardEstimate and deepEstimate are null in discover mode (no fetch)', async () => {
+      const fetchMock = jest.fn();
+      global.fetch = fetchMock;
+
+      const { result } = renderHook(() => (
+        useCostEstimate({ selectedRegions: ['quick'], mode: 'discover' })
+      ));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('discover'));
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result.current.standardEstimate).toBeNull();
+      expect(result.current.deepEstimate).toBeNull();
+    });
+
+    it('standardEstimate and deepEstimate are null while idle (nothing selected)', () => {
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: [], mode: 'standard' }));
+
+      expect(result.current.standardEstimate).toBeNull();
+      expect(result.current.deepEstimate).toBeNull();
+    });
+
+    it('standardEstimate and deepEstimate are null again after an error response', async () => {
+      global.fetch = jest.fn(async () => jsonResponse(400, {}));
+      const { result } = renderHook(() => useCostEstimate({ selectedRegions: ['quick'], mode: 'standard' }));
+
+      await waitFor(() => expect(result.current.costStatus).toBe('bad_scope'));
+      expect(result.current.standardEstimate).toBeNull();
+      expect(result.current.deepEstimate).toBeNull();
+    });
   });
 
   it('shows an explanatory line in discover mode without calling fetch', async () => {
@@ -277,7 +362,7 @@ describe('useCostEstimate', () => {
       jest.useRealTimers();
     });
 
-    it('coalesces two rapid selection changes into exactly one fetch call', () => {
+    it('coalesces two rapid selection changes into exactly one pair of fetch calls', () => {
       jest.useFakeTimers();
       const fetchMock = jest.fn(() => new Promise(() => {})); // never resolves - only call count matters here
       global.fetch = fetchMock;
@@ -288,7 +373,8 @@ describe('useCostEstimate', () => {
       );
 
       // First change starts a 300ms timer; a second change 100ms later must
-      // cancel it and start a fresh one, rather than adding a second call.
+      // cancel it and start a fresh one, rather than adding another pair of
+      // calls.
       act(() => { jest.advanceTimersByTime(100); });
       rerender({ selectedRegions: ['quick', 'eu'] });
 
@@ -296,10 +382,11 @@ describe('useCostEstimate', () => {
       expect(fetchMock).not.toHaveBeenCalled();
 
       act(() => { jest.advanceTimersByTime(1); });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
 
-      const [calledUrl] = fetchMock.mock.calls[0];
-      expect(new URL(String(calledUrl)).searchParams.get('domains')).toBe('quick,eu');
+      for (const [calledUrl] of fetchMock.mock.calls) {
+        expect(new URL(String(calledUrl)).searchParams.get('domains')).toBe('quick,eu');
+      }
     });
 
     it('fires immediately-set costStatus of "loading" before the debounced fetch resolves', () => {
@@ -313,7 +400,7 @@ describe('useCostEstimate', () => {
       expect(fetchMock).not.toHaveBeenCalled();
 
       act(() => { jest.advanceTimersByTime(300); });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
   });
 });

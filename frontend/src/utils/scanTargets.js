@@ -109,6 +109,18 @@ export async function resolveDomainsForTargets(targets) {
     return [...domainById.values()];
 }
 
+// Mirrors ScanManager._domain_channel (src/orchestration/scan_manager.py) -
+// the frontend never scans anything itself, but WP-28's scope preview needs
+// to group the same resolved domain list into the same three channels the
+// backend uses for cost estimation, so a domain landing in "law databases"
+// here is guaranteed to land in the same bucket the price came from.
+export function domainChannel(domain) {
+    const sourceType = domain.source_type || 'crawl';
+    if (sourceType === 'crawl') return 'crawl';
+    if (sourceType === 'eurlex_nim') return 'transposition';
+    return 'law_apis';
+}
+
 export const DEFAULT_CHANNELS = ['crawl', 'law_apis', 'transposition'];
 
 export function buildChannels(selectedChannels) {
