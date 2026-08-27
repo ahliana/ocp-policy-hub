@@ -19,6 +19,13 @@ VIEWPORTS.forEach(({ width, height }) => {
     test.use({ viewport: { width, height } });
 
     test.beforeEach(async ({ page }) => {
+    // On an admin-gated stack (local .env with ADMIN_TOKEN, or production),
+    // sign in the way the app does: the token seeds sessionStorage before
+    // load, passed via E2E_ADMIN_TOKEN at runtime - never committed.
+    const adminToken = process.env.E2E_ADMIN_TOKEN;
+    if (adminToken) {
+      await page.addInitScript((t) => sessionStorage.setItem('admin-token', t), adminToken);
+    }
       await page.goto('/');
       // A fresh profile gets the first-run welcome modal, exactly like a
       // real first visitor - close it the way they would.

@@ -43,6 +43,13 @@ test.describe('help content (WP-30/WP-31 HelpNote and InfoHotspot copy)', () => 
   test.use({ viewport: { width: 1280, height: 900 } });
 
   test.beforeEach(async ({ page }) => {
+    // On an admin-gated stack (local .env with ADMIN_TOKEN, or production),
+    // sign in the way the app does: the token seeds sessionStorage before
+    // load, passed via E2E_ADMIN_TOKEN at runtime - never committed.
+    const adminToken = process.env.E2E_ADMIN_TOKEN;
+    if (adminToken) {
+      await page.addInitScript((t) => sessionStorage.setItem('admin-token', t), adminToken);
+    }
     await page.goto('/');
     const welcomeClose = page.getByRole('button', { name: 'Close help window' });
     if (await welcomeClose.isVisible().catch(() => false)) {
@@ -54,9 +61,12 @@ test.describe('help content (WP-30/WP-31 HelpNote and InfoHotspot copy)', () => 
     // A real scope so the cost-breakdown and scope-preview HelpNotes (which
     // only render once an estimate/resolved source list exists) are present
     // too, not just the always-on ones.
-    const nordicRow = page.getByRole('checkbox', { name: /Nordic/i }).first();
-    await nordicRow.scrollIntoViewIfNeeded();
-    await nordicRow.click();
+    // MUI's SimpleTreeView renders each group as a treeitem whose checkbox
+    // input carries no accessible name of its own - locate the named
+    // treeitem, then check the checkbox inside it.
+    const nordicItem = page.getByRole('treeitem', { name: /Nordic/i }).first();
+    await nordicItem.scrollIntoViewIfNeeded();
+    await nordicItem.locator('input[type="checkbox"]').first().check();
     await expect(page.getByText(/^Scanning:/)).toContainText('$', { timeout: 10_000 });
   });
 
@@ -69,8 +79,17 @@ test.describe('help content (WP-30/WP-31 HelpNote and InfoHotspot copy)', () => 
 
     let combinedText = '';
     for (let i = 0; i < bodyCount; i += 1) {
+      // The jargon scan covers AUTHORED copy only. The scope preview's
+      // source rows render real config data - source display names like
+      // "Riksdagen Open Data API" legitimately contain banned words - so
+      // strip those list items before collecting the text.
       // eslint-disable-next-line no-await-in-loop
-      const text = await bodies.nth(i).innerText();
+      const text = await bodies.nth(i).evaluate((el) => {
+        const clone = el.cloneNode(true);
+        clone.querySelectorAll('.scope-preview-group li, .scope-preview-group ul')
+          .forEach((n) => n.remove());
+        return clone.innerText || clone.textContent || '';
+      });
       expect(text.trim().length).toBeGreaterThan(0);
       combinedText += ` ${text}`;
     }

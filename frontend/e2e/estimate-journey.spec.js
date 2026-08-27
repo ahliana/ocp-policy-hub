@@ -13,6 +13,13 @@ test.describe('estimate journey (scan-cost UX)', () => {
   test.use({ viewport: { width: 1280, height: 900 } });
 
   test.beforeEach(async ({ page }) => {
+    // On an admin-gated stack (local .env with ADMIN_TOKEN, or production),
+    // sign in the way the app does: the token seeds sessionStorage before
+    // load, passed via E2E_ADMIN_TOKEN at runtime - never committed.
+    const adminToken = process.env.E2E_ADMIN_TOKEN;
+    if (adminToken) {
+      await page.addInitScript((t) => sessionStorage.setItem('admin-token', t), adminToken);
+    }
     await page.goto('/');
     // A fresh profile gets the first-run welcome modal, exactly like a real
     // first visitor - close it the way they would.
@@ -28,9 +35,12 @@ test.describe('estimate journey (scan-cost UX)', () => {
     // The Advanced region tree is open by default (WP-6) - pick a real group
     // row rather than a synthetic fixture, so this exercises the actual
     // config the backend resolves against.
-    const nordicRow = page.getByRole('checkbox', { name: /Nordic/i }).first();
-    await nordicRow.scrollIntoViewIfNeeded();
-    await nordicRow.click();
+    // MUI's SimpleTreeView renders each group as a treeitem whose checkbox
+    // input carries no accessible name of its own - locate the named
+    // treeitem, then check the checkbox inside it.
+    const nordicItem = page.getByRole('treeitem', { name: /Nordic/i }).first();
+    await nordicItem.scrollIntoViewIfNeeded();
+    await nordicItem.locator('input[type="checkbox"]').first().check();
 
     // The estimate is debounced (300ms) and comes from a real backend call -
     // give it real time rather than asserting on a fixed delay.
