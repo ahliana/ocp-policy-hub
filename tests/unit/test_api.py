@@ -210,6 +210,55 @@ class TestPolicyRoutes:
         data = response.json()
         assert "total" in data
 
+    @pytest.mark.medium
+    def test_policy_name_en_present_in_stored_record(self, client, mock_store):
+        """Policies flow through as raw dicts (PolicyStore.search) - a stored
+        record's policy_name_en must serialize untouched (WP-35)."""
+        mock_store.search.return_value = [
+            {
+                "url": "https://a.gov/p1", "policy_name": "Energiewendegesetz",
+                "policy_name_en": "Energy Transition Act", "jurisdiction": "Germany",
+            },
+        ]
+        response = client.get("/api/policies")
+        data = response.json()
+        assert data["policies"][0]["policy_name_en"] == "Energy Transition Act"
+
+    @pytest.mark.medium
+    def test_policy_name_en_present_in_in_memory_record(self, client, mock_manager):
+        """In-memory scan results serialize via Policy.model_dump - the new
+        field must appear there too (WP-35)."""
+        mock_manager.get_all_policies.return_value = [
+            Policy(
+                url="https://b.gov/p2",
+                policy_name="Energiewendegesetz",
+                policy_name_en="Energy Transition Act",
+                jurisdiction="DE",
+                policy_type=PolicyType.LAW,
+                summary="Test",
+                relevance_score=7,
+            )
+        ]
+        response = client.get("/api/policies")
+        data = response.json()
+        assert data["policies"][0]["policy_name_en"] == "Energy Transition Act"
+
+    @pytest.mark.medium
+    def test_policy_name_en_absent_when_not_set(self, client, mock_manager):
+        mock_manager.get_all_policies.return_value = [
+            Policy(
+                url="https://c.gov/p3",
+                policy_name="Untranslated Act",
+                jurisdiction="DE",
+                policy_type=PolicyType.LAW,
+                summary="Test",
+                relevance_score=7,
+            )
+        ]
+        response = client.get("/api/policies")
+        data = response.json()
+        assert data["policies"][0]["policy_name_en"] is None
+
 
 # --- Analysis ---
 

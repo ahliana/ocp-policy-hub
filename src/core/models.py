@@ -167,6 +167,10 @@ class PolicyAnalysis(BaseModel):
     relevance_score: int = 0
     policy_type: str = "unknown"
     policy_name: str = ""
+    # English translation of policy_name (WP-35). Optional/defaults to None
+    # so older LLM responses and fixtures that predate this field still
+    # parse without a validation error.
+    policy_name_en: Optional[str] = None
     jurisdiction: str = ""
     summary: str = ""
     key_requirements: str = ""
@@ -194,6 +198,10 @@ LIFECYCLE_STAGES = (
 class Policy(BaseModel):
     url: str
     policy_name: str
+    # English translation of policy_name (WP-35); None when not yet
+    # translated (see src/output/backfill_english.py) or when policy_name
+    # was already English.
+    policy_name_en: Optional[str] = None
     jurisdiction: str
     policy_type: PolicyType
     summary: str

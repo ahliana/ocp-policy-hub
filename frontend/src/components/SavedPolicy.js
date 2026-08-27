@@ -160,6 +160,14 @@ function SavedPolicy({ policy, tags = {}, isAdmin = false }) {
 
     const policyTags = getPolicyTags(policy, tags);
 
+    // Lead with the English title when the analysis produced one and it
+    // differs from the original-language name (WP-35); otherwise render
+    // policy_name exactly as before, with no original-name line at all.
+    const hasEnglishTitle = Boolean(
+        policy.policy_name_en && policy.policy_name_en !== policy.policy_name
+    );
+    const displayName = hasEnglishTitle ? policy.policy_name_en : policy.policy_name;
+
     const getReviewStatusBadge = (status) => {
         const statusMap = {
             new: 'badge-new',
@@ -197,7 +205,12 @@ function SavedPolicy({ policy, tags = {}, isAdmin = false }) {
                 onClick={() => setIsExpanded((current) => !current)}
             >
                 <span className="saved-policy-title-section">
-                    <span className="saved-policy-name">{policy.policy_name}</span>
+                    <span className="saved-policy-name">
+                        {displayName}
+                        {hasEnglishTitle && (
+                            <span className="original-name">{policy.policy_name}</span>
+                        )}
+                    </span>
                     <span className="saved-policy-meta">
                         <span className="saved-policy-jurisdiction">{policy.jurisdiction}</span>
                         <span className={`saved-policy-badge ${getPolicyTypeBadge(policy.policy_type)}`}>

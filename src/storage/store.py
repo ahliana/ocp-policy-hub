@@ -53,7 +53,7 @@ class PolicyStore:
         """Back up a corrupt legacy policies.json before migration runs.
 
         Preserves the pre-SQLite behavior: a corrupt or wrong-shaped
-        policies.json never blocks startup or loses data — it's renamed to
+        policies.json never blocks startup or loses data - it's renamed to
         ``.corrupt`` and migration proceeds as if it were never there.
         """
         db_path = self.data_dir / storage_db.DB_FILENAME
@@ -63,21 +63,21 @@ class PolicyStore:
             data = json.loads(self.policies_file.read_text(encoding="utf-8"))
             if not isinstance(data, list):
                 logger.error(
-                    "policies.json contains %s instead of a list — "
+                    "policies.json contains %s instead of a list - "
                     "backing up to policies.json.corrupt and starting fresh",
                     type(data).__name__,
                 )
                 self._backup_corrupt_file()
         except json.JSONDecodeError as e:
             logger.error(
-                "policies.json is corrupted (JSON parse error: %s) — "
+                "policies.json is corrupted (JSON parse error: %s) - "
                 "backing up to policies.json.corrupt so data is not lost",
                 e,
             )
             self._backup_corrupt_file()
         except Exception as e:
             logger.error(
-                "Failed to read policies.json: %s — "
+                "Failed to read policies.json: %s - "
                 "file preserved, starting with empty policy list",
                 e,
             )
@@ -131,7 +131,7 @@ class PolicyStore:
                 added += 1
         # Commit unconditionally: even a batch that turns out to be all
         # duplicates still ran INSERT OR IGNORE statements, which open an
-        # implicit transaction that must be closed out — otherwise it's
+        # implicit transaction that must be closed out - otherwise it's
         # left open on this connection and blocks the next writer.
         self._conn.commit()
         return added
@@ -165,8 +165,8 @@ class PolicyStore:
 
         ``note`` is the optional reject reason (WP-4 Library): it lives only
         in the raw JSON as ``review_note``, no typed column. It is stored
-        when rejecting with a reason; any other status — including a bare
-        "rejected" with no reason — clears it, so a stale reason never
+        when rejecting with a reason; any other status - including a bare
+        "rejected" with no reason - clears it, so a stale reason never
         survives a status change it doesn't belong to.
         """
         if review_status == "rejected" and note:
@@ -183,9 +183,28 @@ class PolicyStore:
                 "'$.review_note') WHERE url = ?",
                 (review_status, review_status, url),
             )
-        # Commit unconditionally — the UPDATE opened a transaction whether
+        # Commit unconditionally - the UPDATE opened a transaction whether
         # or not it matched a row, and an unmatched url must not leave it
         # open on this connection.
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def update_policy_name_en(self, url: str, value: str) -> bool:
+        """Set a policy's English title (WP-35 backfill) by URL.
+
+        Never overwrites an existing value: the UPDATE only matches a row
+        whose ``policy_name_en`` is currently missing or blank, so calling
+        this twice for the same URL is a no-op the second time. Returns
+        False when the URL isn't found or already has a value.
+        """
+        cur = self._conn.execute(
+            "UPDATE policies SET raw = json_set(raw, '$.policy_name_en', ?) "
+            "WHERE url = ? AND ("
+            "  json_extract(raw, '$.policy_name_en') IS NULL"
+            "  OR json_extract(raw, '$.policy_name_en') = ''"
+            ")",
+            (value, url),
+        )
         self._conn.commit()
         return cur.rowcount > 0
 
@@ -235,7 +254,7 @@ class PolicyStore:
 
     # sort name -> (SQL sort expression, default direction). "discovered_at"
     # isn't a typed column (see src/storage/db.py schema) so it sorts via
-    # json_extract on the raw column instead — the bundled SQLite has JSON1
+    # json_extract on the raw column instead - the bundled SQLite has JSON1
     # built in (confirmed at dev time; sqlite3.sqlite_version >= 3.38), so no
     # LIKE-style fallback is needed the way FTS5 needs one.
     _SORT_COLUMNS = {
@@ -262,14 +281,14 @@ class PolicyStore:
     ) -> list[dict]:
         """Search policies with filters.
 
-        The jurisdiction filter is a case-insensitive substring match — the
+        The jurisdiction filter is a case-insensitive substring match - the
         exact semantics of the JSON-backed store this replaced. FTS5 token
         matching answers mid-word fragments differently, so the FTS index is
         deliberately NOT used here; it exists for the upcoming free-text
         search feature, where new semantics belong.
 
         ``exclude_review_status``/``review_status_in`` are the public review
-        visibility clamp (src/api/review_visibility.py) — additive filters
+        visibility clamp (src/api/review_visibility.py) - additive filters
         that combine with ``review_status`` rather than replace it.
 
         ``sort`` is one of ``"discovered_at"``, ``"name"``, ``"jurisdiction"``,
@@ -322,7 +341,7 @@ class PolicyStore:
         review_status_in: Optional[list[str]] = None,
     ) -> int:
         """Total rows matching the same filters ``search()`` accepts (minus
-        sort/limit/offset) — the ``total`` a paginated caller needs alongside
+        sort/limit/offset) - the ``total`` a paginated caller needs alongside
         one page of results.
         """
         conditions, params = self._search_conditions(
@@ -352,7 +371,7 @@ class PolicyStore:
 
         Uses the ``policies_fts`` FTS5 index (ranked by ``bm25``, name
         matches weighted highest) when available, and falls back to a
-        per-token, per-column case-insensitive substring scan otherwise —
+        per-token, per-column case-insensitive substring scan otherwise -
         same filters, same result shape either way. Malicious or malformed
         query text (quotes, parentheses, boolean operators) is neutralized
         by quoting, never raised.

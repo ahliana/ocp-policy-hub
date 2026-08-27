@@ -47,6 +47,12 @@ function rowStatusClass(status) {
     return '';
 }
 
+// Same rule as SavedPolicy: lead with the English title only when it exists
+// and differs from the original name (WP-35).
+function hasEnglishTitle(policy) {
+    return Boolean(policy.policy_name_en && policy.policy_name_en !== policy.policy_name);
+}
+
 // Admin review surface over the full persisted database (WP-4 "the
 // Library") - GET /api/policies/library, paginated/sorted/filtered in SQL
 // (see src/storage/store.py). Distinct from PolicyList: no in-memory scan
@@ -250,7 +256,10 @@ function LibraryView() {
                                                     (prev) => (prev === policy.url ? null : policy.url),
                                                 )}
                                             >
-                                                {policy.policy_name}
+                                                {hasEnglishTitle(policy) ? policy.policy_name_en : policy.policy_name}
+                                                {hasEnglishTitle(policy) && (
+                                                    <span className="original-name">{policy.policy_name}</span>
+                                                )}
                                             </button>
                                         </td>
                                         <td>{policy.jurisdiction}</td>

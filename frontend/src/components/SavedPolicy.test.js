@@ -105,3 +105,43 @@ describe('SavedPolicy relevance chip on curated records', () => {
         expect(screen.getByText('Curated')).toBeInTheDocument();
     });
 });
+
+describe('SavedPolicy English title (WP-35)', () => {
+    it('leads with policy_name_en and shows the original name beneath when present and different', () => {
+        const { container } = render(
+            <SavedPolicy
+                policy={policy({
+                    policy_name: 'Energiewendegesetz',
+                    policy_name_en: 'Energy Transition Act',
+                })}
+                tags={{}}
+            />
+        );
+        expect(screen.getByText('Energy Transition Act')).toBeInTheDocument();
+        const originalName = container.querySelector('.original-name');
+        expect(originalName).toBeInTheDocument();
+        expect(originalName).toHaveTextContent('Energiewendegesetz');
+    });
+
+    it('renders exactly as today when policy_name_en is absent', () => {
+        const { container } = render(
+            <SavedPolicy policy={policy({ policy_name: 'Heat Reuse Act' })} tags={{}} />
+        );
+        expect(screen.getByText('Heat Reuse Act')).toBeInTheDocument();
+        expect(container.querySelector('.original-name')).not.toBeInTheDocument();
+    });
+
+    it('shows no original-name line when policy_name_en is identical to policy_name', () => {
+        const { container } = render(
+            <SavedPolicy
+                policy={policy({
+                    policy_name: 'Data Center Efficiency Act',
+                    policy_name_en: 'Data Center Efficiency Act',
+                })}
+                tags={{}}
+            />
+        );
+        expect(screen.getByText('Data Center Efficiency Act')).toBeInTheDocument();
+        expect(container.querySelector('.original-name')).not.toBeInTheDocument();
+    });
+});

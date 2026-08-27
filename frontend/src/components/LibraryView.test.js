@@ -306,3 +306,35 @@ describe('LibraryView pagination', () => {
     await screen.findByText(/Showing 26-40 of 40/);
   });
 });
+
+describe('LibraryView English title (WP-35)', () => {
+  it('leads with policy_name_en and shows the original name beneath when present and different', async () => {
+    global.fetch = mockFetch({
+      policies: [{ ...POLICY_NEW, policy_name_en: 'Energy Transition Act', policy_name: 'Energiewendegesetz' }],
+    });
+    const { container } = render(<LibraryView />);
+
+    await screen.findByText('Energy Transition Act');
+    const originalName = container.querySelector('.original-name');
+    expect(originalName).toBeInTheDocument();
+    expect(originalName).toHaveTextContent('Energiewendegesetz');
+  });
+
+  it('renders exactly as today when policy_name_en is absent', async () => {
+    global.fetch = mockFetch({ policies: [POLICY_NEW] });
+    const { container } = render(<LibraryView />);
+
+    await screen.findByText('Alpha Act');
+    expect(container.querySelector('.original-name')).not.toBeInTheDocument();
+  });
+
+  it('shows no original-name line when policy_name_en is identical to policy_name', async () => {
+    global.fetch = mockFetch({
+      policies: [{ ...POLICY_NEW, policy_name_en: 'Alpha Act' }],
+    });
+    const { container } = render(<LibraryView />);
+
+    await screen.findByText('Alpha Act');
+    expect(container.querySelector('.original-name')).not.toBeInTheDocument();
+  });
+});

@@ -154,13 +154,35 @@ class TestCoerceTypes:
         assert result.get("referenced_policies", []) == []
         assert result.get("referenced_urls", []) == []
 
+    @pytest.mark.small
+    def test_policy_name_en_null_normalized_to_none(self):
+        result = _coerce_types({"policy_name_en": "null"})
+        assert result["policy_name_en"] is None
+
+    @pytest.mark.small
+    def test_policy_name_en_empty_string_normalized_to_none(self):
+        result = _coerce_types({"policy_name_en": ""})
+        assert result["policy_name_en"] is None
+
+    @pytest.mark.small
+    def test_policy_name_en_missing_key_left_absent(self):
+        """No key added when the model omits it - PolicyAnalysis's own
+        default (None) applies, same as any old fixture predating this field."""
+        result = _coerce_types({})
+        assert "policy_name_en" not in result
+
+    @pytest.mark.small
+    def test_policy_name_en_real_value_passes_through(self):
+        result = _coerce_types({"policy_name_en": "Energy Transition Act"})
+        assert result["policy_name_en"] == "Energy Transition Act"
+
 
 # --- ClaudeClient.to_policy ---
 
 class TestToPolicy:
     @pytest.fixture
     def client(self):
-        # Create without actual API key — we only test to_policy
+        # Create without actual API key - we only test to_policy
         client = ClaudeClient.__new__(ClaudeClient)
         client.cost = CostInfo()
         return client
@@ -315,6 +337,46 @@ class TestToPolicy:
         assert policy.referenced_policies == []
         assert policy.referenced_urls == []
 
+    @pytest.mark.small
+    def test_policy_name_en_propagates_to_policy(self, client):
+        analysis = PolicyAnalysis(
+            is_relevant=True,
+            policy_name="Energiewendegesetz",
+            policy_name_en="Energy Transition Act",
+            jurisdiction="Germany",
+            summary="x",
+        )
+        policy = client.to_policy(analysis, "https://a.gov", "de")
+        assert policy is not None
+        assert policy.policy_name == "Energiewendegesetz"
+        assert policy.policy_name_en == "Energy Transition Act"
+
+    @pytest.mark.small
+    def test_policy_name_en_repeated_when_already_english(self, client):
+        analysis = PolicyAnalysis(
+            is_relevant=True,
+            policy_name="Data Center Efficiency Act",
+            policy_name_en="Data Center Efficiency Act",
+            jurisdiction="US",
+            summary="x",
+        )
+        policy = client.to_policy(analysis, "https://a.gov", "en")
+        assert policy.policy_name_en == policy.policy_name
+
+    @pytest.mark.small
+    def test_policy_name_en_defaults_to_none_when_omitted(self, client):
+        """Old fixtures / LLM responses without policy_name_en must keep
+        parsing and producing a Policy (WP-35 backward compatibility)."""
+        analysis = PolicyAnalysis(
+            is_relevant=True,
+            policy_name="Test",
+            jurisdiction="US",
+            summary="x",
+        )
+        policy = client.to_policy(analysis, "https://a.gov", "en")
+        assert policy is not None
+        assert policy.policy_name_en is None
+
 
 # --- ClaudeClient.update_cost_estimate ---
 
@@ -366,7 +428,7 @@ class TestUpdateCostEstimate:
         scenario with few calls carrying huge screening token counts and
         many calls carrying tiny analysis token counts makes the old blend
         (call-count-weighted) diverge sharply from the exact per-stage
-        price — assert the exact answer, not the blend's."""
+        price - assert the exact answer, not the blend's."""
         pricing = PricingLoader()
         haiku = pricing.pricing_for(DEFAULT_SCREENING_MODEL)
         sonnet = pricing.pricing_for(DEFAULT_ANALYSIS_MODEL)
@@ -392,7 +454,7 @@ class TestUpdateCostEstimate:
 
         # The old blend priced ALL tokens (screening + analysis combined)
         # at haiku_frac/sonnet_frac of the call counts (1/100 haiku,
-        # 99/100 sonnet) — wildly different from pricing each stage's own
+        # 99/100 sonnet) - wildly different from pricing each stage's own
         # tokens at its own model.
         total_input = screening_input + analysis_input
         total_output = screening_output + analysis_output
@@ -501,6 +563,20 @@ class TestPromptContent:
     def test_analysis_forbids_empty_name_for_relevant(self):
         lowered = ANALYSIS_PROMPT.lower()
         assert "descriptive label" in lowered or "never leave" in lowered
+
+    @pytest.mark.small
+    def test_analysis_mentions_policy_name_en(self):
+        assert "policy_name_en" in ANALYSIS_PROMPT
+
+    @pytest.mark.small
+    def test_analysis_pins_summary_language_to_english(self):
+        lowered = ANALYSIS_PROMPT.lower()
+        assert "write the summary in english" in lowered
+
+    @pytest.mark.small
+    def test_analysis_policy_name_en_repeats_when_already_english(self):
+        lowered = ANALYSIS_PROMPT.lower()
+        assert "already english" in lowered
 
 
 class TestScreeningExcerpt:

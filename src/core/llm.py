@@ -79,9 +79,12 @@ TASK:
      is relevant but states no clear title, write a short descriptive
      label (e.g. "Dutch waste heat feed-in regulation") - never leave the
      name empty for a relevant policy.
+   - Policy name translated to English (policy_name_en). When the original
+     name is already English, repeat it exactly.
    - Jurisdiction (country/region)
    - Type (law/regulation/directive/incentive/grant/plan)
-   - Brief summary (2-3 sentences)
+   - Brief summary (2-3 sentences). Write the summary in English,
+     regardless of the page's language.
    - Effective date (if stated)
    - Key requirements
 
@@ -108,9 +111,10 @@ RESPOND WITH JSON ONLY:
     "relevance_score": 1-10,
     "relevance_explanation": "Brief explanation",
     "policy_name": "Name or null",
+    "policy_name_en": "Name translated to English (repeat if already English)",
     "jurisdiction": "Country/region or null",
     "policy_type": "law|regulation|directive|incentive|grant|plan|unknown",
-    "summary": "2-3 sentences or null",
+    "summary": "2-3 sentences, in English, or null",
     "effective_date": "YYYY-MM-DD or null",
     "key_requirements": "Key points or null",
     "bill_number": "Number or null",
@@ -122,6 +126,7 @@ RESPOND WITH JSON ONLY:
             "is_relevant": true,
             "relevance_score": 1-10,
             "policy_name": "Name (never empty)",
+            "policy_name_en": "Name translated to English (repeat if already English)",
             "jurisdiction": "Country/region",
             "policy_type": "law|regulation|directive|incentive|grant|plan|unknown",
             "summary": "2-3 sentences",
@@ -263,9 +268,10 @@ def _coerce_types(data: dict) -> dict:
 
     # Normalize null-like values
     # Optional[str] fields get None; required str fields get ""
-    _OPTIONAL_FIELDS = {"effective_date", "bill_number"}
-    for key in ["policy_name", "jurisdiction", "summary", "effective_date",
-                "key_requirements", "bill_number", "relevance_explanation"]:
+    _OPTIONAL_FIELDS = {"effective_date", "bill_number", "policy_name_en"}
+    for key in ["policy_name", "policy_name_en", "jurisdiction", "summary",
+                "effective_date", "key_requirements", "bill_number",
+                "relevance_explanation"]:
         if key in result and result[key] in _NULL_VALUES:
             if key == "relevance_explanation":
                 result[key] = "No explanation provided"
@@ -687,6 +693,7 @@ class ClaudeClient:
         return Policy(
             url=url,
             policy_name=policy_name,
+            policy_name_en=analysis.policy_name_en,
             jurisdiction=analysis.jurisdiction or "Unknown",
             policy_type=policy_type,
             summary=analysis.summary or "",
