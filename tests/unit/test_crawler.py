@@ -690,32 +690,41 @@ class TestClosePlaywright:
 class TestPlaywrightDomainConfig:
     """Domain YAML config must correctly pass requires_playwright to scanner."""
 
-    def test_virginia_hb323_requires_playwright(self):
+    def test_a_js_rendered_domain_still_carries_the_flag(self):
+        """The plumbing this class exists to protect. va_legislature is a
+        JavaScript-rendered site that is still crawled, so the flag must
+        still reach the scanner."""
         from src.core.config import ConfigLoader
         config = ConfigLoader(config_dir="config")
         config.load()
         domains = config.get_enabled_domains("all")
-        hb323 = [d for d in domains if d["id"] == "us_va_hb323_2026"]
-        assert len(hb323) == 1
-        assert hb323[0]["requires_playwright"] is True
+        legislature = [d for d in domains if d["id"] == "va_legislature"]
+        assert len(legislature) == 1
+        assert legislature[0]["requires_playwright"] is True
 
-    def test_virginia_hb906_requires_playwright(self):
-        from src.core.config import ConfigLoader
-        config = ConfigLoader(config_dir="config")
-        config.load()
-        domains = config.get_enabled_domains("all")
-        hb906 = [d for d in domains if d["id"] == "us_va_hb906_2026"]
-        assert len(hb906) == 1
-        assert hb906[0]["requires_playwright"] is True
+    def test_the_per_bill_virginia_domains_are_superseded_and_off(self):
+        """Replaced 2026-08-28 by the va_lis_2026 session-file source.
 
-    def test_virginia_hb824_requires_playwright(self):
+        Each of these rendered one React bill page with a headless browser,
+        and HB 323 never reached the database anyway. The session file
+        carries every bill in the session, so leaving these enabled would
+        fetch the same bills twice, the slow way. They stay in the YAML as
+        a record of what was watched by hand; this test is what stops one
+        being switched back on without noticing the duplication.
+        """
         from src.core.config import ConfigLoader
         config = ConfigLoader(config_dir="config")
         config.load()
-        domains = config.get_enabled_domains("all")
-        hb824 = [d for d in domains if d["id"] == "us_va_hb824_2026"]
-        assert len(hb824) == 1
-        assert hb824[0]["requires_playwright"] is True
+        enabled = {d["id"] for d in config.get_enabled_domains("all")}
+        for domain_id in ("us_va_hb323_2026", "us_va_hb906_2026", "us_va_hb824_2026"):
+            assert domain_id not in enabled, (
+                f"{domain_id} is enabled again. If that is deliberate, the "
+                "va_lis_2026 source will already be delivering the same bill."
+            )
+        assert "va_lis_2026" in enabled, (
+            "The per-bill domains are off, so the session-file source must be "
+            "on or Virginia is not covered at all."
+        )
 
     def test_virginia_yaml_has_five_domains(self):
         import yaml

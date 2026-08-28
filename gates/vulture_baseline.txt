@@ -35,7 +35,6 @@ src\core\models.py::variable::domain_name
 src\core\models.py::variable::enable_llm_analysis
 src\core\models.py::variable::enable_two_stage
 src\core\models.py::variable::estimated_analysis_calls
-src\core\models.py::variable::estimated_cost_usd
 src\core\models.py::variable::estimated_keyword_passes
 src\core\models.py::variable::estimated_pages
 src\core\models.py::variable::estimated_screening_calls
@@ -45,7 +44,6 @@ src\core\models.py::variable::fetched_at
 src\core\models.py::variable::flagged_count
 src\core\models.py::variable::force_playwright
 src\core\models.py::variable::is_near_miss
-src\core\models.py::variable::llm_skipped
 src\core\models.py::variable::max_concurrent_scans
 src\core\models.py::variable::max_content_length
 src\core\models.py::variable::min_keyword_matches
@@ -55,7 +53,6 @@ src\core\models.py::variable::requires_human_review
 src\core\models.py::variable::respect_robots_txt
 src\core\models.py::variable::used_playwright
 src\core\scanner.py::attribute::is_near_miss
-src\core\scanner.py::attribute::llm_skipped
 src\core\verifier.py::method::reset
 src\orchestration\events.py::method::cleanup
 src\orchestration\scan_manager.py::attribute::configured
@@ -85,4 +82,5 @@ src\sources\sejm.py::class::SejmSource
 src\sources\stortinget.py::class::StortingetSource
 src\sources\tweede_kamer.py::class::TweedeKamerSource
 src\sources\uk_bills.py::class::UKBillsSource
+src\sources\va_lis.py::class::VirginiaLISSource
 src\storage\leads.py::variable::chased_at

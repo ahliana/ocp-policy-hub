@@ -12,6 +12,43 @@
 # =============================================================================
 
 domains:
+  - name: "Virginia LIS session files"
+    id: "va_lis_2026"
+    enabled: true
+    source_type: "va_lis"
+    base_url: "https://lis.blob.core.windows.net"
+    region:
+      - "us"
+      - "us_states"
+      - "virginia"
+    category: "legislation"
+    tags:
+      - "mandates"
+      - "data_center_specific"
+    policy_types:
+      - "legislation"
+    source_params:
+      session_year: 2026
+      max_documents: 4000
+    notes: |
+      Added 2026-08-28. Replaces per-bill Playwright crawling of
+      lis.virginia.gov, whose bill pages are React shells that return about
+      2,465 bytes before JavaScript runs.
+
+      The Commonwealth publishes the whole session as CSV on Azure blob
+      storage, hourly during session, with no API key and no registration.
+      Measured live on the 2026 regular session: 3,646 bills, 5,780 summary
+      rows, 31 bills mentioning a data centre, and HB 323 among them.
+
+      Two traps live in these files, both covered by tests: the file names
+      do not share a casing convention (BILLS.CSV against Summaries.csv on a
+      case-sensitive store), and the two files spell the same bill
+      differently (HB323 against HB0323), so a naive join matches nothing.
+
+      Coverage is 2025 forward. Earlier sessions live on
+      legacylis.virginia.gov and are still served by the va_legislature
+      crawl domain, which is deliberately left alone.
+
   - name: "Riksdagen Open Data API (Sweden)"
     id: "riksdagen_api"
     enabled: true

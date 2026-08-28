@@ -32,7 +32,6 @@ src/orchestration/scan_manager.py::BLE001::ScanManager._run_scan.scan_domain	3
 src/orchestration/schedule_runner.py::BLE001::ScheduleRunner._loop	1
 src/orchestration/schedule_runner.py::BLE001::run_due_schedules	4
 src/orchestration/schedule_runner.py::S110::run_due_schedules	1
-src/signals/news.py::BLE001::_collect	3
 src/signals/news.py::BLE001::_triage	1
 src/sources/_common.py::BLE001::fetch_document_text	1
 src/sources/check.py::BLE001::_probe	1

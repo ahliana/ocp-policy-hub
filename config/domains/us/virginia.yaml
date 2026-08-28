@@ -63,7 +63,11 @@ domains:
 
   - name: "Virginia HB323 - Data Center Heat Reuse Study"
     id: "us_va_hb323_2026"
-    enabled: true
+    # Superseded 2026-08-28 by the va_lis_2026 session-file source,
+    # which carries every bill in the session including this one.
+    # Left in place rather than deleted: it documents which bills
+    # were being watched by hand, and re-enabling it is one word.
+    enabled: false
     base_url: "https://lis.virginia.gov"
     start_paths:
       - "/bill-details/20261/HB323"
@@ -108,7 +112,11 @@ domains:
 
   - name: "Virginia HB906 - Data Center Load Flexibility"
     id: "us_va_hb906_2026"
-    enabled: true
+    # Superseded 2026-08-28 by the va_lis_2026 session-file source,
+    # which carries every bill in the session including this one.
+    # Left in place rather than deleted: it documents which bills
+    # were being watched by hand, and re-enabling it is one word.
+    enabled: false
     base_url: "https://lis.virginia.gov"
     start_paths:
       - "/bill-details/20261/HB906"
@@ -148,7 +156,11 @@ domains:
 
   - name: "Virginia HB824 - Data Center Energy Generation & Storage"
     id: "us_va_hb824_2026"
-    enabled: true
+    # Superseded 2026-08-28 by the va_lis_2026 session-file source,
+    # which carries every bill in the session including this one.
+    # Left in place rather than deleted: it documents which bills
+    # were being watched by hand, and re-enabling it is one word.
+    enabled: false
     base_url: "https://lis.virginia.gov"
     start_paths:
       - "/bill-details/20261/HB824"

@@ -64,3 +64,4 @@ from . import legiscan  # noqa: E402,F401
 from . import govinfo  # noqa: E402,F401
 from . import regulations_gov  # noqa: E402,F401
 from . import dip_bundestag  # noqa: E402,F401
+from . import va_lis  # noqa: E402,F401
