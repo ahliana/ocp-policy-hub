@@ -15,6 +15,8 @@ from .models import (
     DEFAULT_ANALYSIS_MODEL, DEFAULT_SCREENING_MODEL,
 )
 from .pricing import PricingLoader
+from .scope import DEFAULT_SETTING as DEFAULT_SCOPE
+from .scope import screening_scope_line
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ When in doubt, keep it (relevant=true with lower confidence).
 Mark relevant=true if the page is, or references, government policy touching ANY of:
 - Data center waste heat reuse/recovery, energy efficiency, or reporting requirements
 - District heating / heat networks: expansion plans, connection mandates, feed-in
-  tariffs, or waste-heat feed-in rules - WHETHER OR NOT data centers are named
+  tariffs, or waste-heat feed-in rules
 - Energy efficiency directives or laws with any heat-recovery or waste-heat article
   (e.g. EU EED, Article 26, national transpositions like EnEfG)
 - Building or construction codes requiring heat recovery or waste-heat use
@@ -38,7 +40,7 @@ Mark relevant=true if the page is, or references, government policy touching ANY
   heat sources that mention heat, cooling, or energy reuse
 - Index or listing pages that LINK to any of the above
 
-This is a broad net on purpose: a page need not mention data centers to be relevant.
+{scope_line}
 Content may be in any language (EN, DE, FR, SV, DA, NO, FI, IS, NL, PL, JA, KO, etc.).
 
 URL: {url}
@@ -393,12 +395,22 @@ class ClaudeClient:
     MAX_DELAY = 120.0   # cap matches typical API retry-after values
     MAX_CONTENT_CHARS = 45000
 
+    # A class attribute as well as an instance one, because this codebase
+    # builds clients with ClaudeClient.__new__(ClaudeClient) to test without
+    # an API key, and that path never runs __init__.
+    scope_setting: str = DEFAULT_SCOPE
+
     def __init__(
         self,
         api_key: str,
         analysis_model: str = DEFAULT_ANALYSIS_MODEL,
         screening_model: str = DEFAULT_SCREENING_MODEL,
+        scope_setting: str = DEFAULT_SCOPE,
     ):
+        # What the screener is told about data centres. Generated from the
+        # configured scope rather than written into the prompt, so the model
+        # and the scope gate cannot be given different rules.
+        self.scope_setting = scope_setting
         self._api_key = api_key
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
         self.analysis_model = analysis_model
@@ -449,7 +461,11 @@ class ClaudeClient:
             ScreeningResult with relevant=True/False and confidence 1-10.
         """
         screening_content = screening_excerpt(content, anchor_terms)
-        prompt = SCREENING_PROMPT.format(url=url, content=screening_content)
+        prompt = SCREENING_PROMPT.format(
+            url=url,
+            content=screening_content,
+            scope_line=screening_scope_line(self.scope_setting),
+        )
         delay = self.BASE_DELAY
 
         for attempt in range(1, self.MAX_RETRIES + 1):

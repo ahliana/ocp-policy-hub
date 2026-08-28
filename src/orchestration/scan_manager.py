@@ -475,6 +475,7 @@ class ScanManager:
                     skip_llm=skip_llm,
                     on_event=self.broadcaster.broadcast,
                     screening_min_confidence=settings.analysis.screening_min_confidence,
+                    scope_setting=settings.analysis.data_center_required,
                 )
 
                 try:
@@ -490,6 +491,8 @@ class ScanManager:
                             dp.filtered_excluded = scanner.progress.filtered_excluded
                             dp.filtered_keywords = scanner.progress.filtered_keywords
                             dp.filtered_screening = scanner.progress.filtered_screening
+                            dp.filtered_out_of_scope = (
+                                scanner.progress.filtered_out_of_scope)
                             dp.near_misses = scanner.progress.near_misses
                             dp.keywords_matched = scanner.progress.keywords_matched
                             dp.llm_skipped = scanner.progress.llm_skipped

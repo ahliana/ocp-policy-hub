@@ -10,6 +10,8 @@ from typing import Optional, Callable, Awaitable
 from urllib.parse import urlparse
 
 from .cache import URLCache, compute_content_hash
+from .scope import DEFAULT_SETTING as DEFAULT_SCOPE
+from .scope import OUT_OF_SCOPE, scope_verdict
 from .crawler import AsyncCrawler
 from .extractor import HtmlExtractor
 from .keywords import KeywordMatcher
@@ -39,6 +41,7 @@ class DomainScanner:
         skip_llm: bool = False,
         on_event: Optional[Callable[[ScanEvent], Awaitable[None]]] = None,
         screening_min_confidence: int = 5,
+        scope_setting: str = DEFAULT_SCOPE,
     ):
         self.domain = domain
         self.crawler = crawler
@@ -51,6 +54,7 @@ class DomainScanner:
         self.skip_llm = skip_llm
         self.on_event = on_event
         self.screening_min_confidence = screening_min_confidence
+        self.scope_setting = scope_setting
 
         self.domain_id = domain.get("id", "")
         self.progress = DomainProgress(
@@ -158,10 +162,18 @@ class DomainScanner:
                 "error": str(e),
             })
 
+        if self.progress.filtered_out_of_scope:
+            logger.info(
+                "%s: %d pages dropped by the data-centre scope rule (setting=%s)",
+                self.domain_id, self.progress.filtered_out_of_scope,
+                self.scope_setting,
+            )
+
         await self._emit("domain_complete", {
             "pages": self.progress.pages_crawled,
             "policies": self.progress.policies_found,
             "errors": self.progress.errors,
+            "out_of_scope": self.progress.filtered_out_of_scope,
         })
 
         return policies
@@ -299,6 +311,25 @@ class DomainScanner:
             # Still return a policy stub from cache? For now skip re-analysis.
             logger.debug(f"Cache hit: {result.url}")
             return []  # Cache hit means we already have this policy
+
+        # Stage 4b: scope gate. Both lanes have rejoined by here, so
+        # this is the earliest point that sees every document: the
+        # keyword gate above is skipped entirely by structured sources.
+        # Runs before any model call, so an out-of-scope document costs
+        # nothing.
+        verdict = scope_verdict(extracted.text or "", self.scope_setting)
+        if verdict == OUT_OF_SCOPE:
+            self.progress.pages_filtered += 1
+            self.progress.filtered_out_of_scope += 1
+            logger.info(
+                "Dropped at scope gate (no data centre reference): %s",
+                result.url,
+            )
+            self.cache.set(
+                result.url, is_relevant=False,
+                relevance_score=0, content_hash=content_hash,
+            )
+            return []
 
         # Stage 5: LLM analysis (skip if disabled)
         if self.skip_llm or not self.llm_client:

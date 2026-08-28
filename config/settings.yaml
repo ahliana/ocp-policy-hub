@@ -101,6 +101,21 @@ analysis:
   # Recommended: 4-6 (screen out obvious non-relevant, escalate borderline)
   screening_min_confidence: 5
 
+  # Must a document reference a data centre to be in scope?
+  #
+  #   required  the reviewer's rule, and the default. A district heating or
+  #             thermal energy network policy that never references a data
+  #             centre is dropped before any model call.
+  #   adjacent  keep it, but mark it, so a heat network law a data centre
+  #             might connect to later is visible without filling the queue.
+  #   off       the behaviour before 2026-08-28: everything stays.
+  #
+  # This one value is read by the scope gate AND used to write the line the
+  # screening model is given, so the filter and the model cannot be told
+  # different rules. Changing it changes the cache fingerprint, which means
+  # previously judged pages are re-decided rather than served from cache.
+  data_center_required: "required"
+
 # -----------------------------------------------------------------------------
 # OUTPUT SETTINGS
 # -----------------------------------------------------------------------------

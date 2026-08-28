@@ -268,6 +268,10 @@ class DomainProgress(BaseModel):
     filtered_excluded: int = 0
     filtered_keywords: int = 0
     filtered_screening: int = 0
+    # Dropped for never referencing a data centre. Counted separately
+    # from the keyword and screening drops so the cost of the scope
+    # rule is visible rather than folded into the total.
+    filtered_out_of_scope: int = 0
     near_misses: int = 0
     keywords_matched: int = 0
     policies_found: int = 0
@@ -420,6 +424,10 @@ class AnalysisSettings(BaseModel):
     max_content_length: int = Field(default=50000)
     enable_two_stage: bool = True
     screening_min_confidence: int = Field(default=5, ge=1, le=10)
+    # Whether a document must reference a data centre to be in scope.
+    # required | adjacent | off. See src/core/scope.py; the reviewer's
+    # rule is required, and it is the default.
+    data_center_required: str = "required"
 
 
 class OutputSettings(BaseModel):

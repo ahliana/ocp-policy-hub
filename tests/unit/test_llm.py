@@ -542,14 +542,34 @@ class TestPromptContent:
     def test_analysis_mentions_tax_incentives(self):
         assert "tax incentiv" in ANALYSIS_PROMPT.lower()
 
-    def test_screening_is_recall_first(self):
-        """Screening must cover policies that AFFECT heat reuse without
-        requiring the page to mention data centers."""
+    @pytest.mark.small
+    def test_screening_still_covers_the_indirect_policy_families(self):
+        """Screening must still reach policies that AFFECT heat reuse
+        indirectly. The scope rule narrows which of these count; it must
+        not delete the families themselves."""
         lowered = SCREENING_PROMPT.lower()
         assert "district heating" in lowered
         assert "building" in lowered  # building/construction codes
         assert "permit" in lowered  # planning/permitting rules
-        assert "need not mention" in lowered or "whether or not" in lowered
+
+    @pytest.mark.small
+    def test_the_data_centre_rule_is_not_hardcoded_in_the_prompt(self):
+        """FAILS ON OLD BEHAVIOR. The prompt used to assert in capitals
+        that heat network policy counts whether or not data centres are
+        named, while the reviewer was rejecting exactly those pages. The
+        rule now comes from the scope setting, so the two cannot disagree.
+        """
+        from src.core.scope import OFF, REQUIRED, screening_scope_line
+
+        assert "{scope_line}" in SCREENING_PROMPT
+        assert "whether or not" not in SCREENING_PROMPT.lower()
+
+        required = SCREENING_PROMPT.format(
+            url="u", content="c", scope_line=screening_scope_line(REQUIRED))
+        permissive = SCREENING_PROMPT.format(
+            url="u", content="c", scope_line=screening_scope_line(OFF))
+        assert "must concern data centres" in required.lower()
+        assert "whether or not" in permissive.lower()
 
     def test_screening_tells_model_to_keep_borderline(self):
         lowered = SCREENING_PROMPT.lower()
