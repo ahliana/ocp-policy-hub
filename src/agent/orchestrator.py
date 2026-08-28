@@ -17,6 +17,7 @@ from typing import Any, Callable, Optional
 import anthropic
 import structlog
 
+from .. import aispend
 from ..core.config import ConfigLoader
 from ..core.models import DEFAULT_ANALYSIS_MODEL
 from ..orchestration.events import EventBroadcaster
@@ -365,7 +366,8 @@ class PolicyAgent:
             response = None
             for api_attempt in range(1, MAX_API_RETRIES + 1):
                 try:
-                    response = await self.client.messages.create(
+                    response = await aispend.acreate(
+                        self.client, label="agent:orchestrator",
                         model=self.model,
                         max_tokens=4096,
                         system=self.system_prompt,

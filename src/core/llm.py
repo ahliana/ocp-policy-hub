@@ -9,6 +9,7 @@ from typing import Optional
 import anthropic
 from pydantic import ValidationError
 
+from .. import aispend
 from .models import (
     Policy, PolicyType, PolicyAnalysis, ScreeningResult, CostInfo,
     DEFAULT_ANALYSIS_MODEL, DEFAULT_SCREENING_MODEL,
@@ -455,7 +456,8 @@ class ClaudeClient:
             try:
                 import time
                 _t0 = time.monotonic()
-                response = await self.client.messages.create(
+                response = await aispend.acreate(
+                    self.client, label="core:llm",
                     model=self.screening_model,
                     max_tokens=50,
                     temperature=0.0,
@@ -620,7 +622,8 @@ class ClaudeClient:
             url=url, language=language or "Unknown", content=content,
         )
         _t0 = time.monotonic()
-        response = await self.client.messages.create(
+        response = await aispend.acreate(
+            self.client, label="core:llm",
             model=self.analysis_model,
             max_tokens=1024,
             temperature=0.0,

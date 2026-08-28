@@ -33,6 +33,7 @@ import anthropic
 from ..core.config import ConfigLoader
 from ..core.pricing import PricingLoader
 from ..storage.store import PolicyStore
+from .. import aispend
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,8 @@ async def _translate_title(
     client: anthropic.AsyncAnthropic, model: str, policy_name: str,
 ) -> str:
     """One Haiku call: translate a policy title to English."""
-    response = await client.messages.create(
+    response = await aispend.acreate(
+        client, label="backfill_english",
         model=model,
         max_tokens=200,
         temperature=0.0,

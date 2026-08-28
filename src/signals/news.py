@@ -23,6 +23,7 @@ from ..core.urls import normalize_url
 from ..notifications.mailer import notify_immediate
 from ..storage.leads import Lead, LeadStore
 from ..storage.signals_status import FeedFailure, SignalsStatusStore, SweepSummary
+from .. import aispend
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +247,8 @@ async def _triage(
     )
     client = anthropic.AsyncAnthropic(api_key=api_key)
     try:
-        response = await client.messages.create(
+        response = await aispend.acreate(
+            client, label="signals:news",
             model=model,
             max_tokens=1500,
             temperature=0.0,

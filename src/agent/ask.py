@@ -12,6 +12,7 @@ import json
 import logging
 from typing import Any
 
+from .. import aispend
 from .tools import POLICY_TOOLS, execute_tool
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,8 @@ async def answer_question(
     tool_calls = 0
 
     for _ in range(ASK_MAX_ITERATIONS):
-        response = await client.messages.create(
+        response = await aispend.acreate(
+            client, label="agent:ask",
             model=model,
             max_tokens=ASK_MAX_TOKENS,
             system=READER_SYSTEM_PROMPT,

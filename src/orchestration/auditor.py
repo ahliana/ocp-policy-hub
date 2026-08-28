@@ -6,6 +6,7 @@ from typing import Optional
 
 import anthropic
 
+from .. import aispend
 from ..core.models import DEFAULT_ANALYSIS_MODEL
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,8 @@ class Auditor:
                 flagged_issues=json.dumps(flagged_issues[:30], indent=2, default=str),
             )
 
-            response = await self.client.messages.create(
+            response = await aispend.acreate(
+                self.client, label="auditor",
                 model=self.model,
                 max_tokens=self.MAX_OUTPUT_TOKENS,
                 temperature=0.3,
