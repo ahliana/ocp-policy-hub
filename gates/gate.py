@@ -197,15 +197,28 @@ def note(text: str) -> None:
     _verbose.append(text)
 
 
+# A runaway-HANG backstop for the whole-suite pytest runs, and nothing else.
+# This is not a time budget (see test_no_time_budget.py - budgets that fire on
+# ordinary healthy runs are furniture); it is the line between "slow" and
+# "hung", so it must sit an order of magnitude above any honest run, never at
+# the mean. The old blanket 600 in run() was placed for quick subprocesses and
+# quietly became a suite budget the day a real suite outgrew it: FinDigger at
+# 4,121 tests under coverage was refused six times on 2026-08-27, twice on a
+# provably quiet machine. Quick calls (git, ruff, collection) keep the 600
+# default - a hung `git status` should still die fast.
+SUITE_HANG_BACKSTOP = 3600
+
+
 def run(args: list[str], cwd: Path | None = None,
-        env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        env: dict[str, str] | None = None,
+        timeout: int = 600) -> subprocess.CompletedProcess:
     # env=None inherits, which is what every caller but the reverse test wants.
     # encoding pinned: text=True alone decodes with the ANSI code page on
     # Windows (cp1252), which corrupted non-ASCII test content on the reverse
     # test's round-trip and could hide a non-ASCII filename from every path
     # match (Episode 4 review, m1). wire.py already pinned utf-8; this file
     # never had.
-    p = subprocess.run(args, cwd=cwd or ROOT, capture_output=True, text=True, timeout=600,
+    p = subprocess.run(args, cwd=cwd or ROOT, capture_output=True, text=True, timeout=timeout,
                        env=env, encoding="utf-8", errors="replace")
     note(f"$ {' '.join(str(a) for a in args)}\n[exit {p.returncode}]\n{p.stdout}\n{p.stderr}")
     return p
@@ -977,7 +990,7 @@ def check_tests() -> None:
     there before touching either.
     """
     p = run([PYTEST_PY, "-m", "pytest", str(TESTS), "-q", "-m", "not large",
-             "-p", "no:cacheprovider"], cwd=PYTEST_CWD)
+             "-p", "no:cacheprovider"], cwd=PYTEST_CWD, timeout=SUITE_HANG_BACKSTOP)
     if p.returncode == 5:
         fail("pytest", "pytest exit 5: no tests collected")
     if p.returncode != 0:
@@ -1013,7 +1026,7 @@ def check_tests_full() -> None:
         p = cov_run()
     else:
         p = run([PYTEST_PY, "-m", "pytest", str(TESTS), "-q",
-                 "-p", "no:cacheprovider"], cwd=PYTEST_CWD)
+                 "-p", "no:cacheprovider"], cwd=PYTEST_CWD, timeout=SUITE_HANG_BACKSTOP)
     if p.returncode == 5:
         print("PROOFMARK BLOCK [pytest-full] pytest exit 5: no tests collected")
         ledger_line("block", "pytest-full", "exit 5: no tests collected at push")
@@ -1920,7 +1933,8 @@ def cov_run():
     cov_args = [f"--cov={os.path.relpath(ROOT / rel, PYTEST_CWD)}"
                 for rel in SRC_RELS]
     return run([PYTEST_PY, "-m", "pytest", str(TESTS), "-q", *cov_args,
-                "--cov-report=term", "-p", "no:cacheprovider"], cwd=PYTEST_CWD)
+                "--cov-report=term", "-p", "no:cacheprovider"], cwd=PYTEST_CWD,
+               timeout=SUITE_HANG_BACKSTOP)
 
 
 def persist_coverage_total(stdout: str) -> None:
