@@ -144,6 +144,28 @@ FRAMEWORK_OVERRIDES: dict[str, frozenset[str]] = {
 DO_VERB_BASES = {"BaseHTTPRequestHandler", "SimpleHTTPRequestHandler",
                  "CGIHTTPRequestHandler"}
 
+# A repo's OWN registration decorator, listed by the repo rather than by this
+# file. Same inversion as a route: the class is put in a registry by the
+# decorator and looked up by key, so nothing ever calls it by name and vulture
+# reports the whole plugin family as unwired code.
+#
+# Why a per-repo file rather than a constant here. ROUTE_ATTRS can be a fixed
+# set because `get` and `route` are framework vocabulary shared across repos.
+# `register_source` is PolicyPulse's own word; hard-coding one project's
+# private name into ring canonical would be wrong, and hard-coding a generic
+# name like `register` would whitelist anything anywhere that borrowed it.
+#
+# Arrived from PolicyPulse on 2026-08-28: all 24 of its structured source
+# classes sat in the vulture BASELINE as accepted debt, and every new source
+# needed PROOFMARK_ACCEPT_DEBT to land - the same death spiral this file's
+# docstring describes for endpoints, and the wrong bucket for the same reason
+# (WP-450). The baseline is for debt; this is a registry lookup.
+#
+# Absent file means absent section: a repo that does not list a registrar gets
+# byte-identical output to before this existed, so no ring install's whitelist
+# moves without that repo asking for it.
+REGISTRARS_FILE = Path("gates") / "registrars.txt"
+
 
 def _is_do_verb(name: str) -> bool:
     """do_GET yes, do_something no. The suffix is an HTTP verb, and verbs are
@@ -265,9 +287,100 @@ def framework_overrides(root: Path,
     return sorted(set(found))
 
 
+def _registrars(root: Path) -> set[str]:
+    """Decorator names this repo declares as registrars, or an empty set.
+
+    One name per line, `#` comments and blanks ignored. An empty set means
+    the registered-class scan contributes nothing at all, which is what keeps
+    this change invisible to every repo that has not opted in.
+    """
+    path = root / REGISTRARS_FILE
+    if not path.exists():
+        return set()
+    names = set()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            names.add(line)
+    return names
+
+
+def _defined_function_names(root: Path, subdirs: list[str]) -> set[str]:
+    """Every function defined in the scanned source.
+
+    Used to check that a declared registrar is a real thing this repo wrote.
+    Without it, `gates/registrars.txt` is a wishing well: write `dataclass`
+    or `staticmethod` in it and a whole family of classes is forgiven with no
+    argument behind it. This is the same instinct as keying FRAMEWORK_OVERRIDES
+    on the base class - the entry has to point at something that exists.
+    """
+    names = set()
+    for tree, _ in _parsed_files(root, subdirs):
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                names.add(node.name)
+    return names
+
+
+def _decorator_name(node: ast.AST) -> str | None:
+    """A decorator's terminal name, called or not, bare or attributed.
+
+    `@register_source`, `@register_source()` and `@registry.register_source`
+    all answer `register_source` - terminal-name matching, the same tradeoff
+    _framework_bases and _is_enum already make in this file.
+    """
+    if isinstance(node, ast.Call):
+        node = node.func
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
+
+
+def registered_classes(root: Path,
+                       subdirs: list[str]) -> list[tuple[str, str, int, str]]:
+    """(class name, file relative to root, line, registrar) for every class
+    a declared registration decorator puts into a registry.
+
+    Classes only. A registered FUNCTION is deliberately out of scope: the
+    plugin-registry inversion this fixes is a class put in a table and looked
+    up by key, and widening it to functions would quietly cover a much larger
+    surface than the argument supports.
+    """
+    declared = _registrars(root)
+    if not declared:
+        return []
+
+    defined = _defined_function_names(root, subdirs)
+    unknown = sorted(declared - defined)
+    if unknown:
+        print(
+            f"# WARNING declared registrars not defined in this repo's source, "
+            f"ignored: {unknown}. A registrar must be a decorator this repo "
+            f"writes, not a borrowed name.",
+            file=sys.stderr,
+        )
+    usable = declared & defined
+    if not usable:
+        return []
+
+    found = []
+    for tree, rel in _parsed_files(root, subdirs):
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for decorator in node.decorator_list:
+                name = _decorator_name(decorator)
+                if name in usable:
+                    found.append((node.name, rel, node.lineno, name))
+    return sorted(set(found))
+
+
 def render(handlers: list[tuple[str, str, int]], root: Path,
            members: list[tuple[str, str, int]] | None = None,
-           overrides: list[tuple[str, str, int, str]] | None = None) -> str:
+           overrides: list[tuple[str, str, int, str]] | None = None,
+           registered: list[tuple[str, str, int, str]] | None = None) -> str:
     lines = [
         '"""vulture whitelist: names the framework reaches, not your code.',
         "",
@@ -297,6 +410,10 @@ def render(handlers: list[tuple[str, str, int]], root: Path,
         lines += ["", "# framework overrides"]
         for name, rel, line, base in overrides:
             lines.append(f"{name}  # {rel}:{line} via {base}")
+    if registered:
+        lines += ["", "# registered classes"]
+        for name, rel, line, registrar in registered:
+            lines.append(f"{name}  # {rel}:{line} via @{registrar}")
     return "\n".join(lines) + "\n"
 
 
@@ -315,6 +432,7 @@ def main(argv: list[str]) -> int:
     handlers = route_handlers(root, args[1:])
     members = enum_members(root, args[1:])
     overrides = framework_overrides(root, args[1:])
+    registered = registered_classes(root, args[1:])
     if not handlers:
         # Zero is a real answer for a non-web repo, but it is also what a broken
         # matcher returns, and those must not look alike.
@@ -322,7 +440,7 @@ def main(argv: list[str]) -> int:
               f"the decorators are not in ROUTE_ATTRS: {sorted(ROUTE_ATTRS)}",
               file=sys.stderr)
 
-    text = render(handlers, root, members, overrides)
+    text = render(handlers, root, members, overrides, registered)
     if check:
         target = root / "gates" / "vulture_whitelist.py"
         if not target.exists():
@@ -333,8 +451,8 @@ def main(argv: list[str]) -> int:
                   f"Regenerate it.", file=sys.stderr)
             return 1
         print(f"OK: {target} lists all {len(handlers)} route handlers, "
-              f"{len(members)} enum members, and {len(overrides)} framework "
-              f"overrides")
+              f"{len(members)} enum members, {len(overrides)} framework "
+              f"overrides, and {len(registered)} registered classes")
         return 0
 
     sys.stdout.write(text)

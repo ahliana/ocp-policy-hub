@@ -1,0 +1,12 @@
+# Decorator names this repo uses to put a class into a registry.
+#
+# A class registered this way is looked up by key and never called by name,
+# so vulture reports the whole family as unwired code. Listing the decorator
+# here moves those classes out of the vulture BASELINE (which is for debt)
+# and into the generated whitelist (which is for names something other than
+# our own code reaches). See gates/route_handlers.py.
+#
+# A name here only counts if this repo actually defines a function by that
+# name; a borrowed decorator such as `dataclass` is ignored on purpose.
+
+register_source

@@ -121,3 +121,29 @@ TAX_INCENTIVE  # src\core\models.py:29
 TIMEOUT  # src\core\models.py:46
 UNKNOWN  # src\core\models.py:36
 UNKNOWN_ERROR  # src\core\models.py:50
+
+# registered classes
+CamaraSource  # src\sources\camara.py:69 via @register_source
+DiavgeiaSource  # src\sources\diavgeia.py:68 via @register_source
+DipBundestagSource  # src\sources\dip_bundestag.py:38 via @register_source
+EGovJapanSource  # src\sources\egov_japan.py:62 via @register_source
+EUHaveYourSaySource  # src\sources\eu_have_your_say.py:80 via @register_source
+EURLexNIMSource  # src\sources\eurlex_nim.py:81 via @register_source
+FolketingSource  # src\sources\folketing.py:27 via @register_source
+GovUKSource  # src\sources\govuk.py:72 via @register_source
+GovinfoSource  # src\sources\govinfo.py:29 via @register_source
+KokkaiSource  # src\sources\kokkai.py:52 via @register_source
+LegisInfoSource  # src\sources\legisinfo.py:50 via @register_source
+LegiscanSource  # src\sources\legiscan.py:176 via @register_source
+NZPCOSource  # src\sources\nz_pco.py:93 via @register_source
+OireachtasSource  # src\sources\oireachtas.py:70 via @register_source
+PMGSource  # src\sources\pmg.py:71 via @register_source
+RegulationsGovSource  # src\sources\regulations_gov.py:55 via @register_source
+RiigikoguSource  # src\sources\riigikogu.py:49 via @register_source
+RiksdagenSource  # src\sources\riksdagen.py:35 via @register_source
+RisAustriaSource  # src\sources\ris_austria.py:42 via @register_source
+SejmSource  # src\sources\sejm.py:46 via @register_source
+StortingetSource  # src\sources\stortinget.py:77 via @register_source
+TweedeKamerSource  # src\sources\tweede_kamer.py:51 via @register_source
+UKBillsSource  # src\sources\uk_bills.py:39 via @register_source
+VirginiaLISSource  # src\sources\va_lis.py:240 via @register_source
