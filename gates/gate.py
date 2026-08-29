@@ -1394,6 +1394,19 @@ def check_changelog_entry(msg: str) -> None:
     sys.exit(1)
 
 
+def _files_in_head() -> list[str]:
+    """The files the commit at HEAD changed against its own parent.
+
+    `git show --name-only` rather than a diff against HEAD~1, because it is
+    also correct for a root commit, which has no HEAD~1 to diff against.
+    A failure returns nothing, which blocks - the safe direction.
+    """
+    p = git("show", "--pretty=format:", "--name-only", "HEAD")
+    if p.returncode != 0:
+        return []
+    return [ln for ln in p.stdout.splitlines() if ln.strip()]
+
+
 def commit_msg(path: str) -> None:
     msg = Path(path).read_text(encoding="utf-8")
     check_changelog_entry(msg)
@@ -1401,6 +1414,26 @@ def commit_msg(path: str) -> None:
     if cls is None:
         return
     staged = git("diff", "--cached", "--name-only").stdout.splitlines()
+    if not staged:
+        # Nothing staged against HEAD means `git commit --amend` with no new
+        # changes: a rewrite of the message alone. A normal commit with an
+        # empty index never reaches this hook, because git refuses it first.
+        #
+        # The amended commit keeps HEAD's parent, so the honest question is
+        # what HEAD already changed, not what was staged since. Reading the
+        # index alone blocked every message-only amend of a fix commit, even
+        # one carrying three new tests (found on PolicyPulse, 2026-08-28,
+        # amending c54fe9b). The only ways past were --no-verify or
+        # relabelling the commit type, and a gate that can only be satisfied
+        # by lying about the commit type is worse than no gate.
+        #
+        # Two limits, both narrower than the bug they replace. An amend that
+        # ALSO stages new files is judged on those files alone, because from
+        # inside a hook there is no way to tell that case from an ordinary
+        # commit. And `git commit --allow-empty` looks identical to a
+        # message-only amend here, so an empty fix commit is judged on the
+        # commit before it. Neither is reachable by accident.
+        staged = _files_in_head()
     # A test change means a path under the TESTS DIR, not any filename with
     # "test" in it - `latest_prices.py` satisfied the old substring match
     # (Episode 4 review, M9). JS/TS tests are recognized by their runner
