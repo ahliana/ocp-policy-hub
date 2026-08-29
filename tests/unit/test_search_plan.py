@@ -211,3 +211,55 @@ class TestBuildSearchPlan:
         plan = build_search_plan("Scotland", terms=None, config=loader)
         ids = {s["id"] for s in plan["sources"]}
         assert "uk_bills_api" in ids
+
+
+class TestSourcesExplainThemselves:
+    """An admin picking sources sees a sentence about what each one finds.
+
+    A source with no entry in _SOURCE_INFO falls through to its own domain
+    name, which is not wrong but tells a non-technical person nothing. The
+    Virginia source was shipped without one on 2026-08-28 and this is what
+    caught it.
+    """
+
+    @pytest.mark.small
+    def test_the_virginia_source_says_what_it_finds(self):
+        from src.core.search_plan import _SOURCE_INFO
+
+        kind, env, description = _SOURCE_INFO["va_lis"]
+        assert kind == "law_api"
+        assert env is None, "the session files need no key, which is the point"
+        assert "Virginia" in description
+
+    @pytest.mark.small
+    def test_every_source_explains_itself(self):
+        """A wall, not a ratchet, now that the debt is zero.
+
+        This started as a ratchet at 10 of 24 because backfilling the other
+        fourteen was a content job. They are backfilled, so the next source
+        that ships without a description fails here rather than showing an
+        admin nothing but a domain name.
+        """
+        from src.core.search_plan import _SOURCE_INFO
+        from src.sources import SOURCE_REGISTRY
+
+        missing = sorted(set(SOURCE_REGISTRY) - set(_SOURCE_INFO))
+        assert not missing, (
+            f"{len(missing)} source types do not explain themselves to an "
+            f"admin: {missing}. Add a sentence to _SOURCE_INFO saying what "
+            f"the source finds and when in a policy's life it appears."
+        )
+
+    @pytest.mark.small
+    def test_descriptions_are_written_for_a_person(self):
+        """Not for whoever wrote the adapter. No API vocabulary, and short
+        enough to read in a list of two dozen."""
+        from src.core.search_plan import _SOURCE_INFO
+
+        jargon = ("OData", "endpoint", "API v", "per_page", "JSON", "SRU")
+        for source_id, (_, _, description) in _SOURCE_INFO.items():
+            assert 30 < len(description) < 200, source_id
+            for word in jargon:
+                assert word.lower() not in description.lower(), (
+                    f"{source_id}'s description says {word!r}; an admin "
+                    f"choosing sources does not need to know that")

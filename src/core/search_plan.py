@@ -78,6 +78,88 @@ _SOURCE_INFO = {
         "Bills in all 50 US state legislatures — the earliest signal for US "
         "state policy (catches bills at introduction)",
     ),
+    "camara": (
+        "law_api", None,
+        "Bills in Brazil's Chamber of Deputies - a fast-growing data "
+        "centre market with a tax-incentive push and no other coverage "
+        "here",
+    ),
+    "diavgeia": (
+        "law_api", None,
+        "Greece's transparency register, where by law every government "
+        "act must be posted before it takes effect - so nothing enacted "
+        "is missing",
+    ),
+    "egov_japan": (
+        "law_api", None,
+        "Enacted Japanese law with full-text search - the counterpart "
+        "to the Diet proceedings source, showing what actually became "
+        "law",
+    ),
+    "eu_have_your_say": (
+        "law_api", None,
+        "European Commission initiatives while they are still open for "
+        "feedback - the earliest signal of any source here, months "
+        "before a law exists",
+    ),
+    "govuk": (
+        "law_api", None,
+        "UK consultations and calls for evidence - catches the shape of "
+        "a policy while it is still being decided, before any bill is "
+        "drafted",
+    ),
+    "kokkai": (
+        "law_api", None,
+        "What is being said in the Japanese Diet, rather than what it "
+        "has passed - a leading indicator, so most of what it finds is "
+        "correctly set aside",
+    ),
+    "nz_pco": (
+        "law_api", None,
+        "New Zealand legislation with genuine full-text search, from "
+        "the official drafting office",
+    ),
+    "oireachtas": (
+        "law_api", None,
+        "Bills before the Irish parliament, with full text - Ireland is "
+        "a top EU data centre market and heat reuse is already a "
+        "planning condition there",
+    ),
+    "pmg": (
+        "law_api", None,
+        "South African parliamentary committee activity and open "
+        "comment windows",
+    ),
+    "riigikogu": (
+        "law_api", None,
+        "Documents before the Estonian parliament",
+    ),
+    "ris_austria": (
+        "law_api", None,
+        "Austria's official legal information system - enacted federal "
+        "law and the consolidated statute book",
+    ),
+    "sejm": (
+        "law_api", None,
+        "Prints and bills before the Polish Sejm",
+    ),
+    "stortinget": (
+        "law_api", None,
+        "Cases before the Norwegian Storting - Norway is amending its "
+        "Energy Act to cover surplus heat from data centres, so this is "
+        "a live one",
+    ),
+    "tweede_kamer": (
+        "law_api", None,
+        "Documents before the Dutch parliament - the Netherlands "
+        "already requires some data centres to explore heat reuse",
+    ),
+    "va_lis": (
+        "law_api", None,
+        "Every bill in a Virginia legislative session, from the state's own "
+        "published session files - no key needed, and the most active US "
+        "state for data centre legislation",
+    ),
     "govinfo": (
         "law_api", "GOVINFO_API_KEY",
         "US federal legislation from Congress",
