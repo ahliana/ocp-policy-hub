@@ -77,6 +77,38 @@ class TestMentions:
         not a reference to a data centre."""
         assert not mentions_data_center("metadatacenterpiece")
 
+    @pytest.mark.small
+    @pytest.mark.parametrize("text", [
+        "data center", "data centre", "datacenter", "datacentre",
+        "data centers", "data centres", "Data Center", "DATA CENTRE",
+    ])
+    def test_both_spellings_open_closed_and_plural(self, text):
+        """American and British, spaced and closed up, singular and plural.
+        Bills use all of them and none is more correct than another."""
+        assert mentions_data_center(text)
+
+    @pytest.mark.small
+    @pytest.mark.parametrize("text", [
+        "data-center",
+        "data-centre",
+        "data  centre",
+        "data" + chr(0x00A0) + "centre",   # non-breaking space, out of HTML
+        "data" + chr(0x000A) + "centre",   # a line break, out of a PDF
+    ])
+    def test_however_the_two_words_are_joined(self, text):
+        """FAILS ON OLD BEHAVIOR. The matcher took a single ordinary space,
+        so the hyphenated form was missed entirely and a document reading
+        "data-centre waste heat" was silently out of scope. Legislative text
+        hyphenates compounds, stripped markup leaves non-breaking spaces,
+        and a line break lands between the words in any PDF extraction."""
+        assert mentions_data_center(text)
+
+    @pytest.mark.small
+    def test_a_hyphen_does_not_join_unrelated_words(self):
+        """The separator is tolerant, not blind: it still has to be this
+        term's words in this order."""
+        assert not mentions_data_center("data-driven centre of excellence")
+
 
 class TestVerdict:
     @pytest.mark.small

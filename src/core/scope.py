@@ -92,11 +92,31 @@ DATA_CENTRE_TERMS = [
 # caught but an unrelated substring is not. CJK terms carry no word
 # boundaries, so they are matched plainly.
 _LATIN = re.compile(r"[a-zÀ-ɏ]")
-_PATTERNS = [
-    re.compile(rf"(?<![a-z0-9])({re.escape(term)})", re.IGNORECASE)
-    if _LATIN.search(term) else re.compile(re.escape(term))
-    for term in DATA_CENTRE_TERMS
-]
+
+# What can sit between the words of a multi-word term. Legislative text and
+# stripped markup produce all of these for the same phrase: "data centre",
+# "data-centre", "data  centre" across a line break, and non-breaking spaces
+# out of HTML. Matching only a single ordinary space missed the hyphenated
+# form entirely, which under the required scope rule would have dropped a
+# real data centre bill without a word. Found by Ahliana asking whether
+# spellings were covered, before this ever ran on production.
+_SEPARATOR = r"[\s ‐-―-]+"
+
+
+def _term_pattern(term: str) -> re.Pattern:
+    """A matcher for one term, tolerant of how the words are joined.
+
+    Word-boundary guarded for Latin-script terms so "datacenter" matches
+    inside "datacenters" but not inside an unrelated word. CJK terms carry
+    no word boundaries, so they are matched plainly.
+    """
+    body = _SEPARATOR.join(re.escape(word) for word in term.split())
+    if _LATIN.search(term):
+        return re.compile(rf"(?<![a-z0-9]){body}", re.IGNORECASE)
+    return re.compile(body)
+
+
+_PATTERNS = [_term_pattern(term) for term in DATA_CENTRE_TERMS]
 
 
 def scope_setting(settings: dict | None = None) -> str:
