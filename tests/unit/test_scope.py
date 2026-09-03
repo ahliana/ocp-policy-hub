@@ -12,6 +12,8 @@ import pytest
 from src.core.scope import (
     ADJACENT,
     DEFAULT_SETTING,
+    IN_SCOPE,
+    OUT_OF_SCOPE,
     OFF,
     REQUIRED,
     mentions_data_center,
@@ -223,3 +225,42 @@ class TestTheGateSeesStructuredSources:
         assert source.index("scope_verdict(") < source.index("screen_relevance("), (
             "The scope gate must precede the screening call or it saves nothing."
         )
+
+
+class TestTheGateReadsSourceText:
+    """Lesson PL-001, decision ADR-0001.
+
+    The analysis model writes "data centers" into summaries of bills that
+    never say it. A rule evaluated on a stored summary therefore passes
+    exactly the documents it exists to drop, and reports that it ran.
+    """
+
+    # The summary stored for NJ A4490 in the production database on
+    # 2026-08-28. The bill itself is NJ_A4490 above, which never mentions a
+    # data centre.
+    NJ_A4490_STORED_SUMMARY = (
+        "Establishes a thermal energy network pilot program for gas public "
+        "utilities that could incorporate waste heat sources including data "
+        "centers."
+    )
+
+    @pytest.mark.small
+    def test_the_summary_is_in_scope_while_the_bill_is_not(self):
+        """The trap in one assertion: same document, opposite verdicts,
+        depending on which text the rule is shown."""
+        assert scope_verdict(self.NJ_A4490_STORED_SUMMARY, REQUIRED) == IN_SCOPE
+        assert scope_verdict(NJ_A4490, REQUIRED) == OUT_OF_SCOPE
+
+    @pytest.mark.small
+    def test_the_verdict_is_taken_on_extracted_text_not_a_summary(self):
+        """Reads the pipeline source and fails if the gate is ever handed
+        anything but the page's own extracted text."""
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parents[2]
+                  / "src" / "core" / "scanner.py").read_text(encoding="utf-8")
+        call = source[source.index("scope_verdict("):]
+        call = call[:call.index(")") + 1]
+        assert "extracted.text" in call, call
+        for forbidden in ("summary", "description", "analysis.", "cached."):
+            assert forbidden not in call, call

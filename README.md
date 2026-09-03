@@ -90,6 +90,8 @@ A stat strip above the map keeps the big picture honest at a glance: total track
 - [World Map](#world-map)
 - [Key Features](#key-features)
 - [Geographic Coverage](#geographic-coverage) — 40+ countries, coverage depth
+- [What This Tool Produces](#what-this-tool-produces) — the two surfaces, and who sees unreviewed records
+- [Documentation](#documentation) — how it works, decisions, lessons, changelog
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [CLI Reference](#cli-reference) — every mode and flag
@@ -160,6 +162,59 @@ A stat strip above the map keeps the big picture honest at a glance: total track
 **Legislation databases** (search-endpoint seeded, added 2026-07): EUR-Lex, Legifrance (FR), wetten.overheid.nl (NL), RIS (AT), Irish Statute Book, Finlex (FI), Riigi Teataja (EE), Legilux (LU), e-Gov laws (JP), law.go.kr (KR), retsinformation (DK), lovdata (NO), and bill search for the NY, WA, GA, OH, AZ, IL, VA, TX legislatures.
 
 **Not seeing your country?** Use the `discover` workflow — the agent will web-search for government websites, generate domain configs, and add them permanently. Keywords work in 20 languages.
+
+---
+
+## What This Tool Produces
+
+PolicyPulse writes to two places, for two different audiences. They do not hold the same thing, and the difference matters.
+
+### 1. The Google Sheet — the workstream's working surface
+
+| Worksheet | What lands there | How it is written |
+|-----------|------------------|-------------------|
+| `Staging` | Every policy a scan keeps, deduplicated by URL and tagged `PolicyPulse (automated)` | Appended each run |
+| `Tips` | Leads from the weekly news sweep | Full snapshot, rewritten each run |
+
+The `Staging` tab is a **review queue, not a list of conclusions**. Curators triage it there, and the `Review Status` column syncs both ways: statuses set in the sheet are imported back into the database, and statuses set in the app are written out to the sheet.
+
+### 2. The web app — the public surface
+
+The world map, the policy list, and the "Ask about found policies" box. No account, no API key, no sign-in.
+
+### Review states
+
+Every record carries one: `new` → `reviewed` → `promoted`, or `rejected`.
+
+- `new` means machine output that no human has read yet.
+- Non-admin visitors **never** see `rejected` records.
+
+### Who sees unreviewed records
+
+Both surfaces can show `new` records. The difference is that a curator opening the `Staging` tab knows it is a queue, and a member of the public looking at the map does not.
+
+The `public_visibility` posture setting controls what the public sees:
+
+| Mode | What the public sees by default | Reviewed-only toggle |
+|------|----------------------------------|----------------------|
+| `default_all` *(built-in default)* | Everything except rejected | Shown |
+| `default_reviewed` | Reviewed only | Shown |
+| `reviewed_only` | Reviewed only | Hidden |
+
+**If you run a public deployment, choose this deliberately.** `default_all` suits an instance whose readers are curators working the queue. For a general audience, `default_reviewed` or `reviewed_only` means you are not publishing unreviewed machine claims about what governments require.
+
+---
+
+## Documentation
+
+- [How it works, and why it filters what it filters](docs/HOW_IT_WORKS.md): the pipeline stage by stage with the numbers from the first real monthly scan, the reviewer's vocabulary mapped to the gate that answers each reason, how sources are found and added, how scans run and what they cost. The **Assumptions** and **Reading the Output** sections that used to live here moved there, so there is one place that explains the filters.
+- [Decision records](docs/decisions/README.md): one file per decision that would be expensive to relearn, never edited after the fact.
+- [Lessons register](docs/LESSONS.md): one entry per defect that cost time, with the test that now fails if it comes back.
+- [What changed](docs/CHANGELOG.md), for reviewers and visitors.
+- [Operations runbook](docs/OPERATIONS.md) and [what OCP needs to run it](docs/ADOPTION.md).
+- [Session brief](docs/SESSION_BRIEF.md), for an AI session or a new contributor before the first commit.
+
+A test (`tests/unit/test_lessons_traceability.py`) fails when a lesson names a test that does not exist, a test cites a decision record that does not exist, or a link on those pages points nowhere; a `feat:` commit that changes source must add a line to the changelog. That is how the documentation stays true.
 
 ---
 

@@ -24,3 +24,11 @@ pytest-socket = "0.8.0"
 pytest-cov = "7.1.0"
 coverage = "7.15.3"
 pytest-socket = "0.8.0"
+
+# A `feat:` commit that changes source must add or change a line inside the
+# marked block of docs/CHANGELOG.md. Self-disabling if this block is removed.
+[proofmark.changelog]
+file = "docs/CHANGELOG.md"
+marker = "<!-- proofmark:changelog -->"
+closer = "<!-- /proofmark:changelog -->"
+label = "docs/CHANGELOG.md"

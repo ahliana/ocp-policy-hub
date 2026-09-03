@@ -73,6 +73,15 @@ Data: `data/` — runtime output (policies.json, logs/, gitignored).
 - The project was renamed from `ocp-policy-hub` in March 2026 — no old-name references should exist
 - License: MIT (matches OCP org standard)
 
+## Read before changing the pipeline
+
+- `docs/HOW_IT_WORKS.md` explains every filter, why it exists, the reviewed row that justified it, and where to change it.
+- `docs/decisions/` holds one record per decision. A changed mind is a new record that supersedes the old one, never an edit.
+- `docs/LESSONS.md` holds one entry per defect that cost time, with the test that fails if it comes back.
+- `tests/unit/test_lessons_traceability.py` fails a commit when a lesson names a missing test, a test cites a missing record, or a link points nowhere. The Proofmark changelog gate refuses a `feat:` commit that changes source without a `docs/CHANGELOG.md` line.
+
+The rule: a change to a filter, a prompt, a source's allow-list, the estimator or the review flow lands in the same PR as its decision record (new or superseding), its lesson if it came from a defect, and its `HOW_IT_WORKS.md` paragraph. Two traps worth reading before anything else: PL-001 (rules must run on source text, never a model summary) and PL-003 (check whether a thing ran before asking why it failed).
+
 <!-- proofmark:begin -->
 ## Quality gates (Proofmark) - read before your first commit
 

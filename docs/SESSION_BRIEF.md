@@ -12,6 +12,15 @@ Proofmark's installer; the three sections marked TODO need a human once.
 - Confirm a clean tree and the branch. **Trust no test count you were handed** -
   specs and briefs in this project have been stale by up to five sessions.
 - Measure the baseline yourself: `.venv\Scripts\python.exe -m pytest tests -q`
+- Read `docs/HOW_IT_WORKS.md`, `docs/LESSONS.md` and `docs/decisions/` before
+  changing any filter, prompt, source rule or the estimator. The lessons
+  register names the test that guards each lesson; the traceability test
+  keeps the pointers honest.
+- Before diagnosing a filter, read `scans` and `scan_domains` for the source in
+  question. Check whether a thing ran before asking why it failed (PL-003).
+- Never write `until <cond>; do sleep N; done`. Wait with a bounded loop that
+  gives up and watches for the failure signal too:
+  `for i in $(seq 1 60); do <check> && break; sleep 10; done` (PL-005).
 
 ## Layout
 
